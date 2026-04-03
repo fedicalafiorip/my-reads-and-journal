@@ -1,0 +1,13 @@
+{
+  "name": "Book Journal",
+  "short_name": "BookJournal",
+  "description": "Seu diário de leituras pessoal",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF7F5",
+  "theme_color": "#C4A0D4",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

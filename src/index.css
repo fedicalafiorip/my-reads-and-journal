@@ -1,0 +1,34 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: 'DM Sans', 'Helvetica Neue', sans-serif;
+  background: #FAF7F5;
+  color: #2D2A32;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+}
+
+input, textarea, select, button {
+  font-family: inherit;
+  -webkit-appearance: none;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes bjFade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes bjSlide {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
