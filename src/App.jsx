@@ -1843,7 +1843,7 @@ function BookClubView() {
           <h3 style={{ fontFamily: fonts.display, fontSize: 18, color: colors.text, marginBottom: 16, fontStyle: "italic" }}>
             📖 Definir livro do mês
           </h3>
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
             <button onClick={() => setShowSearch(true)}
               style={{ background: colors.clubSoft, border: `1.5px solid ${colors.club}`, borderRadius: 16,
                 padding: "8px 16px", fontFamily: fonts.body, fontSize: 12, fontWeight: 600, color: colors.clubDark, cursor: "pointer" }}>
@@ -1856,6 +1856,36 @@ function BookClubView() {
             </button>
             <input ref={fileRef} type="file" accept="image/*" onChange={handleBookCover} style={{ display: "none" }} />
           </div>
+
+          {/* Pick from voting nominations */}
+          {nominations.length > 0 && (
+            <div style={{ background: colors.card, borderRadius: 12, padding: 12, marginBottom: 16,
+              border: `1px solid ${colors.border}` }}>
+              <p style={{ fontFamily: fonts.body, fontSize: 11, fontWeight: 700, color: colors.textMuted,
+                textTransform: "uppercase", letterSpacing: .6, margin: "0 0 10px" }}>🗳️ Da votação ({nominations.length})</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {nominations.slice(0, 5).map(n => (
+                  <button key={n.id} onClick={() => {
+                    setBookDraft({ title: n.title, author: n.author || "", coverUrl: n.coverUrl || "", pages: "", genre: n.genre || "" });
+                  }}
+                    style={{ display: "flex", gap: 10, alignItems: "center", padding: 8,
+                      borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.card,
+                      cursor: "pointer", textAlign: "left", transition: "all .2s", width: "100%" }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = colors.club; e.currentTarget.style.background = colors.clubSoft; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.background = colors.card; }}>
+                    {n.coverUrl && <img src={n.coverUrl} alt="" style={{ width: 32, height: 46, objectFit: "cover", borderRadius: 4 }} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: 600, color: colors.text, margin: 0 }}>{n.title}</p>
+                      {n.author && <p style={{ fontFamily: fonts.body, fontSize: 10, color: colors.textMuted, margin: 0 }}>{n.author}</p>}
+                    </div>
+                    <span style={{ fontFamily: fonts.body, fontSize: 10, fontWeight: 700, color: colors.club }}>
+                      {(n.votes||[]).length} 🗳️
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {bookDraft.coverUrl && (
             <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
               <img src={bookDraft.coverUrl} alt="" style={{ width: 80, height: 115, objectFit: "cover", borderRadius: 8,
@@ -2142,7 +2172,7 @@ export default function App() {
       <div style={{ padding: "16px 20px 0", position: "sticky", top: 0, background: `${colors.bg}f0`,
         backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Logo height={28} />
+          <Logo height={42} />
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             {view==="library" && (
               <button onClick={() => { setShowSearchBar(!showSearchBar); setSearchQ(""); }}
