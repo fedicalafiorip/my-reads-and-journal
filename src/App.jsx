@@ -229,7 +229,23 @@ function CoverSearch({ onSelect, onClose }) {
   const search = async (query) => {
     if (!query.trim()) { setResults([]); return; } setLoading(true);
     try {
-      const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=12&langRestrict=pt`);
+      // Try Open Library first (more reliable, no API key needed)
+      const olr = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=12&lang=por`);
+      const olData = await olr.json();
+      const olResults = (olData.docs || []).slice(0, 12).map(d => ({
+        id: d.key,
+        title: d.title || "",
+        author: (d.author_name || []).join(", "),
+        cover: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : "",
+        pages: d.number_of_pages_median || "",
+        genre: (d.subject || []).slice(0, 2).join(", "),
+        description: "",
+      })).filter(i => i.cover);
+
+      if (olResults.length > 0) { setResults(olResults); setLoading(false); return; }
+
+      // Fallback: Google Books
+      const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=12`);
       const data = await r.json();
       setResults((data.items||[]).map(i => ({ id: i.id, title: i.volumeInfo?.title||"",
         author: (i.volumeInfo?.authors||[]).join(", "),
@@ -380,9 +396,11 @@ function ShareCard({ books, onClose }) {
 }
 
 /* ── LIBRARY VIEW ── */
-function LibraryView({ books, onSelect, onSelectSeries, filter, setFilter }) {
+function LibraryView({ books, allBooks, allYears, onSelect, onSelectSeries, filter, setFilter }) {
   const [showShare, setShowShare] = useState(false);
-  const sorted = [...books].sort((a, b) => {
+  const [recYear, setRecYear] = useState("all");
+
+  const sortBooks = (list) => [...list].sort((a, b) => {
     if (a.status === "reading" && b.status !== "reading") return -1;
     if (b.status === "reading" && a.status !== "reading") return 1;
     if (a.status === "reading" && b.status === "reading")
@@ -392,40 +410,67 @@ function LibraryView({ books, onSelect, onSelectSeries, filter, setFilter }) {
     return new Date(b.createdAt) - new Date(a.createdAt);
   });
 
+  // For "Eu Recomendo" — use ALL books across all years
+  const isFavorites = filter === "favorites";
+  const sourceBooks = isFavorites
+    ? (allBooks || []).filter(b => b.favorite && b.status !== "wishlist")
+    : books;
+
+  const sorted = sortBooks(sourceBooks);
+
   const filtered = sorted.filter(b => {
+    if (isFavorites) {
+      if (recYear !== "all" && b.year !== parseInt(recYear)) return false;
+      return true;
+    }
     if (filter === "all") return true;
     if (filter === "read") return b.status === "read";
     if (filter === "reading") return b.status === "reading";
-    if (filter === "favorites") return b.favorite;
     if (filter === "ku") return b.kindleUnlimited;
     return true;
   });
 
-  // Group by series
-  const seriesMap = {};
-  const standalone = [];
-  filtered.forEach(b => {
-    if (b.seriesName) {
-      if (!seriesMap[b.seriesName]) seriesMap[b.seriesName] = [];
-      seriesMap[b.seriesName].push(b);
-    } else {
-      standalone.push(b);
-    }
-  });
+  // Group by series (only for non-favorites view)
+  const buildDisplayItems = (bookList) => {
+    const seriesMap = {};
+    bookList.forEach(b => { if (b.seriesName) { if (!seriesMap[b.seriesName]) seriesMap[b.seriesName] = []; seriesMap[b.seriesName].push(b); } });
+    const items = [];
+    const seriesSeen = new Set();
+    bookList.forEach(b => {
+      if (b.seriesName) {
+        if (!seriesSeen.has(b.seriesName)) { seriesSeen.add(b.seriesName); items.push({ type: "series", name: b.seriesName, books: seriesMap[b.seriesName] }); }
+      } else { items.push({ type: "book", book: b }); }
+    });
+    return items;
+  };
 
-  // Build display items in order of first appearance
-  const displayed = [];
-  const seriesSeen = new Set();
-  filtered.forEach(b => {
-    if (b.seriesName) {
-      if (!seriesSeen.has(b.seriesName)) {
-        seriesSeen.add(b.seriesName);
-        displayed.push({ type: "series", name: b.seriesName, books: seriesMap[b.seriesName] });
-      }
-    } else {
-      displayed.push({ type: "book", book: b });
-    }
-  });
+  // For favorites with "all" years, group by year
+  const favYears = isFavorites && recYear === "all"
+    ? [...new Set(filtered.map(b => b.year))].sort((a, b) => b - a)
+    : null;
+
+  const allFavCount = isFavorites ? (allBooks || []).filter(b => b.favorite && b.status !== "wishlist").length : 0;
+  const displayed = !isFavorites || recYear !== "all" ? buildDisplayItems(filtered) : null;
+
+  const renderBookGrid = (bookList) => {
+    const items = buildDisplayItems(bookList);
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 18, justifyItems: "center" }}>
+        {items.map((item, idx) => {
+          if (item.type === "series") return <SeriesStack key={item.name} books={item.books} seriesName={item.name} onClick={() => onSelectSeries(item.name)} />;
+          const book = item.book;
+          return (
+            <div key={book.id} style={{ textAlign: "left", width: "100%", maxWidth: 130 }}>
+              <Cover book={book} onClick={() => onSelect(book)} showBadge={true} />
+              <div style={{ marginTop: 6 }}><Stars rating={book.rating} size={13} interactive={false} /></div>
+              <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, marginTop: 3,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.title || "Sem título"}</p>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div style={{ padding: "0 20px 100px" }}>
@@ -437,43 +482,67 @@ function LibraryView({ books, onSelect, onSelectSeries, filter, setFilter }) {
         <Pill active={filter === "ku"} onClick={() => setFilter("ku")}>📱 KU</Pill>
       </div>
 
-      {/* Share button for recommendations */}
-      {filter === "favorites" && filtered.length > 0 && (
-        <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={() => setShowShare(true)}
-            style={{ background: `linear-gradient(135deg,${colors.accent},${colors.accentDark})`,
-              color: "#fff", border: "none", borderRadius: 16, padding: "8px 16px",
-              fontFamily: fonts.body, fontSize: 12, fontWeight: 600, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 5,
-              boxShadow: `0 3px 10px rgba(156,114,176,.3)` }}>
-            📤 Compartilhar recomendações
-          </button>
+      {/* Year filter for Eu Recomendo */}
+      {isFavorites && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
+            <button onClick={() => setRecYear("all")}
+              style={{ background: recYear === "all" ? colors.accent : "transparent",
+                color: recYear === "all" ? "#fff" : colors.textMuted,
+                border: `1px solid ${recYear === "all" ? colors.accent : colors.border}`,
+                borderRadius: 14, padding: "4px 12px", fontFamily: fonts.body, fontSize: 11,
+                fontWeight: 600, cursor: "pointer" }}>Todos ({allFavCount})</button>
+            {(allYears || []).map(y => {
+              const cnt = (allBooks||[]).filter(b => b.favorite && b.status !== "wishlist" && b.year === y).length;
+              if (!cnt) return null;
+              return (
+                <button key={y} onClick={() => setRecYear(String(y))}
+                  style={{ background: recYear === String(y) ? colors.accent : "transparent",
+                    color: recYear === String(y) ? "#fff" : colors.textMuted,
+                    border: `1px solid ${recYear === String(y) ? colors.accent : colors.border}`,
+                    borderRadius: 14, padding: "4px 12px", fontFamily: fonts.body, fontSize: 11,
+                    fontWeight: 600, cursor: "pointer" }}>{y} ({cnt})</button>
+              );
+            })}
+          </div>
+          {filtered.length > 0 && (
+            <button onClick={() => setShowShare(true)}
+              style={{ background: `linear-gradient(135deg,${colors.accent},${colors.accentDark})`,
+                color: "#fff", border: "none", borderRadius: 14, padding: "6px 14px",
+                fontFamily: fonts.body, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+              📤 Compartilhar
+            </button>
+          )}
         </div>
       )}
-      {displayed.length === 0 ? (
+
+      {filtered.length === 0 ? (
         <div style={{ textAlign: "center", padding: "50px 20px", color: colors.textMuted, fontFamily: fonts.body }}>
-          <div style={{ fontSize: 42, marginBottom: 12, opacity: .4 }}>📚</div>
-          <p style={{ fontSize: 15 }}>{filter === "all" ? "Nenhum livro neste ano ainda" : "Nenhum livro nesta categoria"}</p>
-          <p style={{ fontSize: 12, color: colors.textLight }}>Toque no + para adicionar</p>
+          <div style={{ fontSize: 42, marginBottom: 12, opacity: .4 }}>{isFavorites ? "💜" : "📚"}</div>
+          <p style={{ fontSize: 15 }}>{isFavorites ? "Nenhum livro recomendado ainda" : filter === "all" ? "Nenhum livro neste ano ainda" : "Nenhum livro nesta categoria"}</p>
+          <p style={{ fontSize: 12, color: colors.textLight }}>{isFavorites ? "Marque livros como 'Eu Recomendo' na review" : "Toque no + para adicionar"}</p>
         </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 18, justifyItems: "center" }}>
-          {displayed.map((item, idx) => {
-            if (item.type === "series") {
-              return <SeriesStack key={item.name} books={item.books} seriesName={item.name}
-                onClick={() => onSelectSeries(item.name)} />;
-            }
-            const book = item.book;
+      ) : isFavorites && recYear === "all" && favYears ? (
+        /* Grouped by year with separators */
+        <div>
+          {favYears.map(yr => {
+            const yrBooks = filtered.filter(b => b.year === yr);
+            if (!yrBooks.length) return null;
             return (
-              <div key={book.id} style={{ textAlign: "left", width: "100%", maxWidth: 130 }}>
-                <Cover book={book} onClick={() => onSelect(book)} showBadge={true} />
-                <div style={{ marginTop: 6 }}><Stars rating={book.rating} size={13} interactive={false} /></div>
-                <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, marginTop: 3,
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.title || "Sem título"}</p>
+              <div key={yr} style={{ marginBottom: 24 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                  <div style={{ flex: 1, height: 1, background: colors.border }} />
+                  <span style={{ fontFamily: fonts.display, fontSize: 14, fontWeight: 700, color: colors.accent, fontStyle: "italic" }}>{yr}</span>
+                  <div style={{ flex: 1, height: 1, background: colors.border }} />
+                </div>
+                {renderBookGrid(yrBooks)}
               </div>
             );
           })}
         </div>
+      ) : (
+        renderBookGrid(filtered)
       )}
 
       {showShare && <ShareCard books={filtered} onClose={() => setShowShare(false)} />}
@@ -2048,13 +2117,24 @@ export default function App() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h1 style={{ fontFamily: fonts.display, fontSize: 26, fontWeight: 700, color: colors.text, margin: 0, letterSpacing: -.5 }}>
             <span style={{ color: colors.accent }}>Book</span> Journal</h1>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             {view==="library" && (
               <button onClick={() => { setShowSearchBar(!showSearchBar); setSearchQ(""); }}
                 style={{ background: showSearchBar ? colors.accentSoft : "transparent",
                   border: `1px solid ${showSearchBar ? colors.accent : colors.border}`,
                   borderRadius: 20, width: 34, height: 34, display: "flex", alignItems: "center",
                   justifyContent: "center", cursor: "pointer", fontSize: 15 }}>🔍</button>)}
+            {isMain && view!=="wishlist" && view!=="bookclub" && (
+              <select value={year} onChange={e => { const v = e.target.value; if (v === "add") { addYear(); } else { setYear(parseInt(v)); setView("library"); setFilter("all"); } }}
+                style={{ background: colors.card, border: `1.5px solid ${colors.border}`, borderRadius: 14,
+                  padding: "6px 28px 6px 12px", fontFamily: fonts.body, fontSize: 14, fontWeight: 700,
+                  color: colors.accent, cursor: "pointer", outline: "none", appearance: "none",
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23C4A0D4' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E")`,
+                  backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}>
+                {(data.years||[]).map(y => <option key={y} value={y}>{y}</option>)}
+                <option value="add">+ Ano</option>
+              </select>
+            )}
             <button onClick={() => setShowBackup(!showBackup)}
               style={{ background: showBackup ? colors.accentSoft : "transparent",
                 border: `1px solid ${showBackup ? colors.accent : colors.border}`,
@@ -2062,20 +2142,6 @@ export default function App() {
                 justifyContent: "center", cursor: "pointer", fontSize: 14 }}>⚙️</button>
           </div>
         </div>
-        {isMain && (
-          <div style={{ display: "flex", gap: 0, marginTop: 10, overflowX: "auto", scrollbarWidth: "none", paddingBottom: 2 }}>
-            {(data.years||[]).map(y => (
-              <button key={y} onClick={() => { setYear(y); if (view!=="wishlist"&&view!=="bookclub") setView("library"); setFilter("all"); }}
-                style={{ background: "none", border: "none",
-                  borderBottom: year===y && view!=="wishlist" && view!=="bookclub" ? `2.5px solid ${colors.accent}` : "2.5px solid transparent",
-                  padding: "8px 14px", fontFamily: fonts.body, fontSize: 14,
-                  fontWeight: year===y && view!=="wishlist" && view!=="bookclub" ? 700 : 400,
-                  color: year===y && view!=="wishlist" && view!=="bookclub" ? colors.accent : colors.textMuted,
-                  cursor: "pointer", transition: "all .2s", whiteSpace: "nowrap" }}>{y}</button>))}
-            <button onClick={addYear} style={{ background: "none", border: "none", padding: "8px 10px",
-              fontSize: 16, color: colors.textLight, cursor: "pointer", borderBottom: "2.5px solid transparent" }}>+</button>
-          </div>
-        )}
         {isMain && (
           <>
             {showSearchBar && view==="library" && (
@@ -2129,7 +2195,7 @@ export default function App() {
 
       {/* CONTENT */}
       <div style={{ paddingTop: 18 }}>
-        {view==="library" && <LibraryView books={searchedBooks} onSelect={b => { setSelected(b); setView("review"); }}
+        {view==="library" && <LibraryView books={searchedBooks} allBooks={data.books||[]} allYears={data.years||[]} onSelect={b => { setSelected(b); setView("review"); }}
           onSelectSeries={name => { setActiveSeries(name); setView("series"); }} filter={filter} setFilter={setFilter} />}
         {view==="series" && activeSeries && <SeriesView seriesName={activeSeries} books={seriesBooks}
           onSelectBook={b => { setSelected(b); setView("review"); }}
