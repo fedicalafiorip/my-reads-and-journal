@@ -81,7 +81,7 @@ const emptyBook = (year, seriesName = "") => ({
   startDate: "", endDate: "", summary: "", rating: 0, quote: "", review: "",
   coverUrl: "", coverColor: rcolor(), status: "reading", favorite: false,
   seriesName: seriesName, seriesNumber: 0, seriesTotal: 0,
-  kindleUnlimited: false, price: "",
+  kindleUnlimited: false, price: "", currentPage: "",
   year: year || new Date().getFullYear(), createdAt: new Date().toISOString(),
 });
 
@@ -176,6 +176,12 @@ function Cover({ book, w = 110, h = 158, radius = 8, onClick, showBadge = false,
         <div style={{ position: "absolute", bottom: 5, right: 5, background: colors.kindle, color: "#fff",
           fontSize: 7, fontFamily: fonts.body, fontWeight: 700, padding: "2px 5px", borderRadius: 6,
           letterSpacing: .3 }}>KU</div>
+      )}
+      {book.status === "reading" && parseInt(book.pages) > 0 && parseInt(book.currentPage) > 0 && (
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 4, background: "rgba(0,0,0,.15)" }}>
+          <div style={{ height: "100%", background: `linear-gradient(90deg, ${colors.accent}, ${colors.accentDark})`,
+            width: `${Math.min(100, Math.round((parseInt(book.currentPage) / parseInt(book.pages)) * 100))}%` }} />
+        </div>
       )}
     </div>
   );
@@ -875,6 +881,40 @@ function ReviewPage({ book, onUpdate, onDelete, onBack, allBooks, backLabel = "�
               </div>
             );
           })()}
+
+          {/* Reading progress */}
+          {b.status === "reading" && parseInt(b.pages) > 0 && (
+            <div style={{ marginTop: 12, background: colors.accentSoft, borderRadius: 12, padding: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <label style={{ fontFamily: fonts.body, fontSize: 11, fontWeight: 700, color: colors.accentDark,
+                  textTransform: "uppercase", letterSpacing: .6 }}>📖 Progresso de leitura</label>
+                <span style={{ fontFamily: fonts.display, fontSize: 14, fontWeight: 700, color: colors.accent }}>
+                  {Math.min(100, Math.round(((parseInt(b.currentPage)||0) / parseInt(b.pages)) * 100))}%
+                </span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, whiteSpace: "nowrap" }}>Página</span>
+                <input type="number" value={b.currentPage||""} onChange={e => {
+                    const val = Math.min(parseInt(b.pages), Math.max(0, parseInt(e.target.value)||0));
+                    set("currentPage", val || "");
+                  }}
+                  placeholder="0" min="0" max={b.pages}
+                  style={{ width: 70, fontFamily: fonts.display, fontSize: 18, fontWeight: 700, color: colors.accent,
+                    textAlign: "center", border: "none", borderBottom: `2px solid ${colors.accent}`,
+                    background: "transparent", outline: "none", padding: "2px 4px" }} />
+                <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted }}>de {b.pages}</span>
+              </div>
+              <div style={{ background: colors.card, borderRadius: 6, height: 8, overflow: "hidden" }}>
+                <div style={{ height: "100%", borderRadius: 6, transition: "width .4s ease",
+                  background: `linear-gradient(90deg, ${colors.accent}, ${colors.accentDark})`,
+                  width: `${Math.min(100, Math.round(((parseInt(b.currentPage)||0) / parseInt(b.pages)) * 100))}%` }} />
+              </div>
+              {parseInt(b.currentPage) >= parseInt(b.pages) && (
+                <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.green, fontWeight: 600,
+                  marginTop: 6, textAlign: "center" }}>🎉 Parabéns! Livro concluído!</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div style={{ background: colors.card, borderRadius: 12, padding: 16, marginBottom: 20, border: `1px solid ${colors.border}` }}>
