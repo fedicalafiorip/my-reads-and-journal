@@ -2264,7 +2264,7 @@ export default function App() {
                   border: `1px solid ${showSearchBar ? colors.accent : colors.border}`,
                   borderRadius: 20, width: 34, height: 34, display: "flex", alignItems: "center",
                   justifyContent: "center", cursor: "pointer", fontSize: 15 }}>🔍</button>)}
-            {isMain && view!=="wishlist" && view!=="bookclub" && (
+            {(view==="library" || view==="stats") && (
               <select value={year} onChange={e => { const v = e.target.value; if (v === "add") { addYear(); } else { setYear(parseInt(v)); setView("library"); setFilter("all"); } }}
                 style={{ background: colors.card, border: `1.5px solid ${colors.border}`, borderRadius: 14,
                   padding: "6px 28px 6px 12px", fontFamily: fonts.body, fontSize: 14, fontWeight: 700,
@@ -2392,6 +2392,12 @@ export default function App() {
           onUpdate={updateBook} onDelete={deleteBook}
           backLabel={activeSeries ? `← ${activeSeries}` : "← Biblioteca"}
           onBack={() => { setSelected(null); setView(activeSeries ? "series" : "library"); }} />}
+        {view==="stats" && (
+          <div style={{ padding: "0 20px" }}>
+            <button onClick={() => setView("library")} style={{ background: "none", border: "none", fontSize: 14, color: colors.accent,
+              cursor: "pointer", fontFamily: fonts.body, fontWeight: 600, padding: "8px 0", marginBottom: 8 }}>← Voltar</button>
+          </div>
+        )}
         {view==="stats" && <StatsView books={yearBooks} />}
         {view==="wishlist" && <WishlistView wishes={data.wishes||[]} onUpdate={updateWishes} onAdd={addWish} onDelete={deleteWish} onStartReading={startReading} />}
         {view==="bookclub" && <BookClubView />}
