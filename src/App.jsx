@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const STORAGE_KEY = "bookjournal-v4";
 
+
 const colors = {
   bg: "#FAF7F5", card: "#FFFFFF", accent: "#C4A0D4", accentLight: "#EDE4F3",
   accentDark: "#9B72B0", accentSoft: "#F3EBF8", rose: "#E8B4B8",
@@ -45,6 +46,31 @@ function Logo({ height = 24 }) {
 }
 
 function rid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+// Compress images to max ~150KB to avoid Firestore 1MB document limit
+function compressImage(file, maxWidth = 300, quality = 0.5) {
+  return new Promise((resolve) => {
+    // If it's already a URL (not a file), just return it
+    if (typeof file === "string") { resolve(file); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let w = img.width, h = img.height;
+        if (w > maxWidth) { h = (maxWidth / w) * h; w = maxWidth; }
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => resolve(e.target.result);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
+}
 function rcolor() {
   const p = ["#C4A0D4","#E8B4B8","#A8C5D6","#D4C4A0","#B8D4A0","#D4A0A0","#A0BED4","#C4D4A0","#D4B8A0","#A0D4C4","#B0A0D4","#D4A0C4"];
   return p[Math.floor(Math.random() * p.length)];
@@ -642,7 +668,7 @@ function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading }) {
   const moveItem = (i, d) => { const n = i+d; if (n<0||n>=wishes.length) return; const a=[...wishes]; [a[i],a[n]]=[a[n],a[i]]; onUpdate(a); };
   const updateWish = (id, f, v) => onUpdate(wishes.map(w => w.id === id ? { ...w, [f]: v } : w));
   const handleCoverUpload = (wid, e) => { const f = e.target.files?.[0]; if (!f) return;
-    const r = new FileReader(); r.onload = ev => updateWish(wid, "coverUrl", ev.target.result); r.readAsDataURL(f); };
+    compressImage(f).then(url => updateWish(wid, "coverUrl", url)); };
   const handleSearchSelect = (r) => { const w = emptyWish(); w.title=r.title; w.author=r.author; w.genre=r.genre; w.coverUrl=r.cover; onUpdate([...wishes,w]); setShowSearch(false); };
 
   return (
@@ -754,7 +780,7 @@ function ReviewPage({ book, onUpdate, onDelete, onBack, allBooks, backLabel = "�
     setB(u); onUpdate(u); setShowSearch(false);
   };
   const handleFile = e => { const f = e.target.files?.[0]; if (!f) return;
-    const r = new FileReader(); r.onload = ev => set("coverUrl", ev.target.result); r.readAsDataURL(f); };
+    compressImage(f).then(url => set("coverUrl", url)); };
 
   // Find existing series for autocomplete
   const existingSeries = [...new Set((allBooks||[]).filter(x => x.seriesName).map(x => x.seriesName))];
@@ -1228,16 +1254,12 @@ function BookClubView() {
 
   const handleProfilePhoto = (e) => {
     const f = e.target.files?.[0]; if (!f) return;
-    const r = new FileReader();
-    r.onload = ev => setProfileDraft(p => ({ ...p, photo: ev.target.result }));
-    r.readAsDataURL(f);
+    compressImage(f, 200, 0.7).then(url => setProfileDraft(p => ({ ...p, photo: url })));
   };
 
   const handleBookCover = (e) => {
     const f = e.target.files?.[0]; if (!f) return;
-    const r = new FileReader();
-    r.onload = ev => setBookDraft(b => ({ ...b, coverUrl: ev.target.result }));
-    r.readAsDataURL(f);
+    compressImage(f).then(url => setBookDraft(b => ({ ...b, coverUrl: url })));
   };
 
   const handleSearchSelect = (result) => {
@@ -1628,7 +1650,7 @@ function BookClubView() {
                     color: colors.wishDark, cursor: "pointer" }}>📋 Da Wishlist</button>
                 <button onClick={() => { const inp = document.createElement("input"); inp.type="file"; inp.accept="image/*";
                   inp.onchange = (ev) => { const f = ev.target.files?.[0]; if (!f) return;
-                    const r = new FileReader(); r.onload = e => setNomDraft(d => ({ ...d, coverUrl: e.target.result })); r.readAsDataURL(f); };
+                    compressImage(f).then(url => setNomDraft(d => ({ ...d, coverUrl: url }))); };
                   inp.click(); }}
                   style={{ background: colors.clubSoft, border: `1.5px solid ${colors.club}`, borderRadius: 14,
                     padding: "6px 12px", fontFamily: fonts.body, fontSize: 11, fontWeight: 600,
@@ -1668,14 +1690,14 @@ function BookClubView() {
               display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "bjFade .2s ease" }}
               onClick={e => e.target === e.currentTarget && setShowWishPick(false)}>
               <div style={{ background: colors.bg, borderRadius: "20px 20px 0 0", width: "100%",
-                maxWidth: 500, maxHeight: "70vh", overflow: "hidden", display: "flex",
-                flexDirection: "column", animation: "bjSlide .3s ease" }}>
+                maxWidth: 500, animation: "bjSlide .3s ease" }}>
                 <div style={{ padding: "16px 20px 12px", borderBottom: `1px solid ${colors.border}`,
                   display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <h3 style={{ fontFamily: fonts.display, fontSize: 16, fontStyle: "italic", color: colors.text, margin: 0 }}>Escolher da Wishlist</h3>
                   <button onClick={() => setShowWishPick(false)} style={{ background: "none", border: "none", fontSize: 20, color: colors.textMuted, cursor: "pointer" }}>✕</button>
                 </div>
-                <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
+                <div style={{ overflowY: "auto", padding: 12, maxHeight: "60vh",
+                  WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
                   {myWishes.length === 0 ? (
                     <p style={{ textAlign: "center", color: colors.textMuted, fontFamily: fonts.body, fontSize: 13, padding: 20 }}>Sua wishlist está vazia</p>
                   ) : (
@@ -2089,7 +2111,29 @@ export default function App() {
     setLoaded(true);
   })(); }, []);
 
-  const save = useCallback(async d => { setData(d); try { await window.storage.set(STORAGE_KEY, JSON.stringify(d)); } catch(e) {} }, []);
+  const save = useCallback(async d => {
+    setData(d);
+    try {
+      await window.storage.set(STORAGE_KEY, JSON.stringify(d));
+    } catch(e) {
+      console.error("Save failed, retrying without large covers:", e);
+      // If save fails (likely Firestore 1MB limit), strip large base64 covers and retry
+      try {
+        const lite = { ...d, books: (d.books||[]).map(b => {
+          if (b.coverUrl && b.coverUrl.startsWith("data:") && b.coverUrl.length > 50000) {
+            return { ...b, coverUrl: "" };
+          }
+          return b;
+        }), wishes: (d.wishes||[]).map(w => {
+          if (w.coverUrl && w.coverUrl.startsWith("data:") && w.coverUrl.length > 50000) {
+            return { ...w, coverUrl: "" };
+          }
+          return w;
+        })};
+        await window.storage.set(STORAGE_KEY, JSON.stringify(lite));
+      } catch(e2) { console.error("Save lite also failed:", e2); }
+    }
+  }, []);
 
   const exportBackup = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
