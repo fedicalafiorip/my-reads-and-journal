@@ -1,7 +1,7 @@
 {
-  "name": "Book Journal",
-  "short_name": "BookJournal",
-  "description": "Seu diário de leituras pessoal",
+  "name": "My Reads & Journal",
+  "short_name": "MyReads",
+  "description": "Seu diário de leituras pessoal com Book Club para compartilhar com seus amigos",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FAF7F5",
