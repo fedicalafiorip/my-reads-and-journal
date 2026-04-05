@@ -666,31 +666,62 @@ function SeriesView({ seriesName, books, onSelectBook, onAddBook, onBack }) {
 }
 
 /* ── WISHLIST VIEW ── */
-function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading }) {
+function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading, allBooks }) {
   const [editingId, setEditingId] = useState(null);
   const [showSearch, setShowSearch] = useState(false);
   const fileRefs = useRef({});
+  const itemRefs = useRef({});
+  const [dragIdx, setDragIdx] = useState(null);
+
+  // Author autocomplete from all books
+  const knownAuthors = [...new Set([...(allBooks||[]).map(b => b.author), ...wishes.map(w => w.author)].filter(Boolean))].sort();
 
   const moveItem = (i, d) => { const n = i+d; if (n<0||n>=wishes.length) return; const a=[...wishes]; [a[i],a[n]]=[a[n],a[i]]; onUpdate(a); };
   const updateWish = (id, f, v) => onUpdate(wishes.map(w => w.id === id ? { ...w, [f]: v } : w));
   const handleCoverUpload = (wid, e) => { const f = e.target.files?.[0]; if (!f) return;
     compressImage(f).then(url => updateWish(wid, "coverUrl", url)); };
-  const handleSearchSelect = (r) => { const w = emptyWish(); w.title=r.title; w.author=r.author; w.genre=r.genre; w.coverUrl=r.cover; onUpdate([...wishes,w]); setShowSearch(false); };
+  const handleSearchSelect = (r) => { const w = emptyWish(); w.title=r.title; w.author=r.author; w.genre=r.genre; w.coverUrl=r.cover; onUpdate([...wishes,w]); setShowSearch(false); setEditingId(w.id);
+    setTimeout(() => itemRefs.current[w.id]?.scrollIntoView({ behavior: "smooth", block: "center" }), 100); };
+
+  const handleAddManual = () => {
+    const id = onAdd();
+    setEditingId(id);
+    setTimeout(() => itemRefs.current[id]?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+  };
+
+  // Touch drag reorder
+  const touchState = useRef({ startY: 0, idx: -1, moved: false });
+  const handleTouchStart = (i, e) => {
+    touchState.current = { startY: e.touches[0].clientY, idx: i, moved: false };
+    setDragIdx(i);
+  };
+  const handleTouchMove = (e) => {
+    if (dragIdx === null) return;
+    const dy = e.touches[0].clientY - touchState.current.startY;
+    const itemH = 100;
+    const steps = Math.round(dy / itemH);
+    if (steps !== 0) {
+      const newIdx = Math.max(0, Math.min(wishes.length - 1, touchState.current.idx + steps));
+      if (newIdx !== dragIdx) {
+        const a = [...wishes]; const [item] = a.splice(dragIdx, 1); a.splice(newIdx, 0, item);
+        onUpdate(a); setDragIdx(newIdx); touchState.current.startY = e.touches[0].clientY; touchState.current.idx = newIdx;
+        touchState.current.moved = true;
+      }
+    }
+  };
+  const handleTouchEnd = () => { setDragIdx(null); };
 
   return (
-    <div style={{ padding: "0 20px 100px", maxWidth: 650, margin: "0 auto" }}>
+    <div style={{ padding: "0 20px 100px", maxWidth: 650, margin: "0 auto" }}
+      onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
         <div>
           <h2 style={{ fontFamily: fonts.display, fontSize: 22, color: colors.text, margin: 0, fontStyle: "italic" }}>📋 Minha Wishlist</h2>
           <p style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted, margin: "2px 0 0" }}>
-            {wishes.length} livro{wishes.length !== 1 ? "s" : ""} • use as setas para reorganizar</p>
+            {wishes.length} livro{wishes.length !== 1 ? "s" : ""} • segure e arraste para reorganizar</p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setShowSearch(true)} style={{ background: colors.wishSoft, border: `1.5px solid ${colors.wish}`,
-            borderRadius: 18, padding: "7px 14px", fontFamily: fonts.body, fontSize: 12, fontWeight: 600, color: colors.wishDark, cursor: "pointer" }}>🔍 Buscar</button>
-          <button onClick={onAdd} style={{ background: `linear-gradient(135deg,${colors.wish},${colors.wishDark})`,
-            border: "none", borderRadius: 18, padding: "7px 14px", fontFamily: fonts.body, fontSize: 12, fontWeight: 600, color: "#fff", cursor: "pointer" }}>+ Manual</button>
-        </div>
+        <button onClick={() => setShowSearch(true)} style={{ background: colors.wishSoft, border: `1.5px solid ${colors.wish}`,
+          borderRadius: 18, padding: "7px 14px", fontFamily: fonts.body, fontSize: 12, fontWeight: 600, color: colors.wishDark, cursor: "pointer" }}>🔍 Buscar</button>
       </div>
       {wishes.length === 0 ? (
         <div style={{ textAlign: "center", padding: "50px 20px", color: colors.textMuted, fontFamily: fonts.body }}>
@@ -702,32 +733,41 @@ function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {wishes.map((wish, i) => {
             const isE = editingId === wish.id;
+            const isDragging = dragIdx === i;
             return (
-              <div key={wish.id} style={{ background: colors.card, borderRadius: 14, padding: 14,
-                border: `1.5px solid ${colors.border}`, display: "flex", gap: 12, alignItems: "flex-start", transition: "all .2s" }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0 }}>
+              <div key={wish.id} ref={el => itemRefs.current[wish.id] = el}
+                style={{ background: isDragging ? colors.wishSoft : colors.card, borderRadius: 14, padding: 14,
+                border: `1.5px solid ${isDragging ? colors.wish : colors.border}`, display: "flex", gap: 12, alignItems: "flex-start",
+                transition: isDragging ? "none" : "all .2s", transform: isDragging ? "scale(1.02)" : "none",
+                boxShadow: isDragging ? `0 6px 20px ${colors.shadow}` : "none" }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0 }}
+                  onTouchStart={e => handleTouchStart(i, e)}>
                   <button onClick={() => moveItem(i,-1)} disabled={i===0} style={{ background: "none", border: "none", fontSize: 14,
                     cursor: i===0?"default":"pointer", color: i===0?colors.border:colors.textMuted, padding: "2px 4px", lineHeight: 1 }}>▲</button>
                   <div style={{ width: 26, height: 26, borderRadius: "50%", background: colors.wishSoft, display: "flex",
-                    alignItems: "center", justifyContent: "center", fontFamily: fonts.display, fontSize: 13, fontWeight: 700, color: colors.wishDark }}>{i+1}</div>
+                    alignItems: "center", justifyContent: "center", fontFamily: fonts.display, fontSize: 13, fontWeight: 700, color: colors.wishDark, touchAction: "none" }}>{i+1}</div>
                   <button onClick={() => moveItem(i,1)} disabled={i===wishes.length-1} style={{ background: "none", border: "none", fontSize: 14,
                     cursor: i===wishes.length-1?"default":"pointer", color: i===wishes.length-1?colors.border:colors.textMuted, padding: "2px 4px", lineHeight: 1 }}>▼</button>
                 </div>
-                <div style={{ flexShrink: 0, textAlign: "center" }}>
-                  <Cover book={wish} w={55} h={80} radius={6} />
+                <div style={{ flexShrink: 0, textAlign: "center" }} onClick={() => !isE && setEditingId(wish.id)}>
+                  <Cover book={wish} w={55} h={80} radius={6} onClick={() => setEditingId(wish.id)} />
                   <input ref={el => fileRefs.current[wish.id]=el} type="file" accept="image/*" onChange={e => handleCoverUpload(wish.id,e)} style={{ display: "none" }} />
-                  {isE && <button onClick={() => fileRefs.current[wish.id]?.click()} style={{ marginTop: 4, background: "none", border: "none",
+                  {isE && <button onClick={(e) => { e.stopPropagation(); fileRefs.current[wish.id]?.click(); }} style={{ marginTop: 4, background: "none", border: "none",
                     fontSize: 9, color: colors.accent, cursor: "pointer", fontFamily: fonts.body, fontWeight: 600 }}>📷 Capa</button>}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   {isE ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <input value={wish.title} onChange={e => updateWish(wish.id,"title",e.target.value)} placeholder="Título"
+                      <input value={wish.title} onChange={e => updateWish(wish.id,"title",e.target.value)} placeholder="Título" autoFocus
                         style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: 600, border: "none", borderBottom: `1px solid ${colors.border}`,
                           padding: "3px 0", outline: "none", background: "transparent", color: colors.text }} />
-                      <input value={wish.author||""} onChange={e => updateWish(wish.id,"author",e.target.value)} placeholder="Autor"
-                        style={{ fontFamily: fonts.body, fontSize: 12, border: "none", borderBottom: `1px solid ${colors.border}`,
-                          padding: "3px 0", outline: "none", background: "transparent", color: colors.textMuted }} />
+                      <div style={{ position: "relative" }}>
+                        <input value={wish.author||""} onChange={e => updateWish(wish.id,"author",e.target.value)} placeholder="Autor"
+                          list={`authors-${wish.id}`}
+                          style={{ fontFamily: fonts.body, fontSize: 12, border: "none", borderBottom: `1px solid ${colors.border}`,
+                            padding: "3px 0", outline: "none", background: "transparent", color: colors.textMuted, width: "100%" }} />
+                        <datalist id={`authors-${wish.id}`}>{knownAuthors.map(a => <option key={a} value={a} />)}</datalist>
+                      </div>
                       <div style={{ marginTop: 4 }}><GenrePicker value={wish.genre} onChange={v => updateWish(wish.id,"genre",v)} compact={true} /></div>
                       <textarea value={wish.note} onChange={e => updateWish(wish.id,"note",e.target.value)}
                         placeholder="Anotação (sobre o que é, quem indicou, por que quer ler...)"
@@ -767,6 +807,14 @@ function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading }) {
         </div>
       )}
       {showSearch && <CoverSearch onSelect={handleSearchSelect} onClose={() => setShowSearch(false)} />}
+      {/* FAB */}
+      <div onClick={handleAddManual} style={{ position: "fixed", bottom: 28, right: 20, width: 54, height: 54,
+        borderRadius: "50%", background: `linear-gradient(135deg,${colors.wish},${colors.wishDark})`,
+        display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+        boxShadow: `0 4px 16px rgba(168,197,214,.5)`, zIndex: 30, fontSize: 26, color: "#fff",
+        transition: "transform .2s" }}
+        onMouseEnter={e => e.currentTarget.style.transform = "scale(1.1)"}
+        onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>+</div>
     </div>
   );
 }
@@ -788,8 +836,9 @@ function ReviewPage({ book, onUpdate, onDelete, onBack, allBooks, backLabel = "�
   const handleFile = e => { const f = e.target.files?.[0]; if (!f) return;
     compressImage(f).then(url => set("coverUrl", url)); };
 
-  // Find existing series for autocomplete
+  // Find existing series and authors for autocomplete
   const existingSeries = [...new Set((allBooks||[]).filter(x => x.seriesName).map(x => x.seriesName))];
+  const knownAuthors = [...new Set((allBooks||[]).map(x => x.author).filter(Boolean))].sort();
 
   const inp = { fontFamily: fonts.body, fontSize: 14, color: colors.text, border: "none",
     borderBottom: `1px solid ${colors.border}`, background: "transparent", padding: "6px 0", width: "100%", outline: "none" };
@@ -833,8 +882,9 @@ function ReviewPage({ book, onUpdate, onDelete, onBack, allBooks, backLabel = "�
               style={{ ...inp, fontFamily: fonts.display, fontSize: 18, fontWeight: 600 }}
               onFocus={e => e.target.style.borderColor=colors.accent} onBlur={e => e.target.style.borderColor=colors.border} /></div>
           <div style={{ marginBottom: 12 }}><label style={lbl}>Autor</label>
-            <input value={b.author} onChange={e => set("author",e.target.value)} placeholder="Autor(a)" style={inp}
-              onFocus={e => e.target.style.borderColor=colors.accent} onBlur={e => e.target.style.borderColor=colors.border} /></div>
+            <input value={b.author} onChange={e => set("author",e.target.value)} placeholder="Autor(a)" list="known-authors" style={inp}
+              onFocus={e => e.target.style.borderColor=colors.accent} onBlur={e => e.target.style.borderColor=colors.border} />
+            <datalist id="known-authors">{knownAuthors.map(a => <option key={a} value={a} />)}</datalist></div>
           <div style={{ marginBottom: 14 }}><label style={lbl}>Gênero</label>
             <div style={{ marginTop: 6 }}><GenrePicker value={b.genre} onChange={v => set("genre",v)} /></div></div>
           <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
@@ -1213,6 +1263,8 @@ function BookClubView() {
   const fileRef = useRef(null);
   const profileFileRef = useRef(null);
   const [showAddNom, setShowAddNom] = useState(false);
+  const [showSwapDialog, setShowSwapDialog] = useState(false);
+  const [swapFinalized, setSwapFinalized] = useState(true);
   const [nomDraft, setNomDraft] = useState({ title: "", author: "", coverUrl: "", genre: "" });
   const [showNomSearch, setShowNomSearch] = useState(false);
   const [showWishPick, setShowWishPick] = useState(false);
@@ -1261,14 +1313,18 @@ function BookClubView() {
   const handleSetBook = async () => {
     if (!bookDraft.title) return;
     const month = new Date().toISOString().slice(0, 7);
-    // Save current book to history before replacing
     const history = [...(club.history || [])];
-    if (club.currentBook) {
+    // Only add to history/stats if finalized
+    if (club.currentBook && swapFinalized) {
       const bookRatings = (club.ratings || {})[club.currentBook.month] || {};
       history.push({ ...club.currentBook, ratings: bookRatings });
     }
-    const updated = { ...club, currentBook: { ...bookDraft, month, setBy: profile.name }, history };
+    // Reset all nomination votes for fresh start
+    const cleanNoms = (club.nominations || []).map(n => ({ ...n, votes: [] }));
+    const updated = { ...club, currentBook: { ...bookDraft, month, setBy: profile.name },
+      history, nominations: cleanNoms, updates: [] };
     await saveClub(updated);
+    setSwapFinalized(true);
     setTab("feed");
   };
 
@@ -1379,9 +1435,10 @@ function BookClubView() {
 
   const podium = currentBook ? rankedMembers.slice(0, 3) : [];
 
-  // Nominations (voting)
+  // Nominations (voting) — filter out current book
   const nominations = (club.nominations || [])
     .filter(n => !(n.alreadyRead || []).length)
+    .filter(n => !currentBook || n.title.toLowerCase() !== currentBook.title.toLowerCase())
     .sort((a, b) => (b.votes || []).length - (a.votes || []).length);
 
   const addNomination = async (nom) => {
@@ -1394,10 +1451,14 @@ function BookClubView() {
 
   const toggleVote = async (nomId) => {
     const noms = (club.nominations || []).map(n => {
-      if (n.id !== nomId) return n;
-      const votes = n.votes || [];
-      const idx = votes.indexOf(profile.id);
-      return { ...n, votes: idx >= 0 ? votes.filter(v => v !== profile.id) : [...votes, profile.id] };
+      if (n.id === nomId) {
+        // Toggle vote on this one
+        const votes = n.votes || [];
+        const idx = votes.indexOf(profile.id);
+        return { ...n, votes: idx >= 0 ? votes.filter(v => v !== profile.id) : [...votes, profile.id] };
+      }
+      // Remove vote from all others (one vote at a time)
+      return { ...n, votes: (n.votes || []).filter(v => v !== profile.id) };
     });
     await saveClub({ ...club, nominations: noms });
   };
@@ -1463,7 +1524,7 @@ function BookClubView() {
                 </div>
               )}
               {currentBook.pages && <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textLight, margin: "4px 0 0" }}>{currentBook.pages} páginas</p>}
-              <button onClick={() => setTab("setbook")}
+              <button onClick={() => setShowSwapDialog(true)}
                 style={{ marginTop: 6, background: "none", border: "none", color: colors.club,
                   fontFamily: fonts.body, fontSize: 11, cursor: "pointer", fontWeight: 600, padding: 0 }}>Trocar livro →</button>
             </div>
@@ -2126,6 +2187,45 @@ function BookClubView() {
         );
       })()}
 
+      {/* Swap dialog */}
+      {showSwapDialog && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 200,
+          display: "flex", alignItems: "center", justifyContent: "center", animation: "bjFade .15s ease", padding: 20 }}
+          onClick={e => e.target === e.currentTarget && setShowSwapDialog(false)}>
+          <div style={{ background: colors.bg, borderRadius: 20, padding: 24, maxWidth: 340, width: "100%",
+            boxShadow: "0 20px 60px rgba(0,0,0,.2)", animation: "bjFade .2s ease", textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>📖</div>
+            <h3 style={{ fontFamily: fonts.display, fontSize: 18, color: colors.text, margin: "0 0 6px", fontStyle: "italic" }}>Trocar livro do mês</h3>
+            <p style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, margin: "0 0 20px", lineHeight: 1.5 }}>
+              O que aconteceu com "{currentBook?.title}"?
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button onClick={() => { setShowSwapDialog(false); setSwapFinalized(true); setBookDraft({ title: "", author: "", coverUrl: "", pages: "", genre: "" }); setTab("setbook"); }}
+                style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", cursor: "pointer",
+                  background: `linear-gradient(135deg,${colors.green},${colors.greenDark})`, color: "#fff",
+                  fontFamily: fonts.body, fontSize: 14, fontWeight: 600 }}>
+                ✅ Finalizamos o livro
+              </button>
+              <p style={{ fontFamily: fonts.body, fontSize: 10, color: colors.textLight, margin: "-4px 0 4px" }}>
+                Entra nas estatísticas do clube
+              </p>
+              <button onClick={() => { setShowSwapDialog(false); setSwapFinalized(false); setBookDraft({ title: "", author: "", coverUrl: "", pages: "", genre: "" }); setTab("setbook"); }}
+                style={{ width: "100%", padding: "12px 16px", borderRadius: 14, cursor: "pointer",
+                  background: "transparent", border: `1.5px solid ${colors.border}`, color: colors.textMuted,
+                  fontFamily: fonts.body, fontSize: 14, fontWeight: 600 }}>
+                🔄 Apenas trocar
+              </button>
+              <p style={{ fontFamily: fonts.body, fontSize: 10, color: colors.textLight, margin: "-4px 0 4px" }}>
+                Não entra nas estatísticas
+              </p>
+              <button onClick={() => setShowSwapDialog(false)}
+                style={{ background: "none", border: "none", color: colors.textMuted, fontFamily: fonts.body,
+                  fontSize: 12, cursor: "pointer", marginTop: 4 }}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSearch && <CoverSearch onSelect={handleSearchSelect} onClose={() => setShowSearch(false)} />}
     </div>
   );
@@ -2226,7 +2326,11 @@ export default function App() {
   };
   const deleteBook = id => save({ ...data, books: data.books.filter(b => b.id!==id) });
   const addYear = () => { const m = Math.max(...data.years); save({ ...data, years: [...data.years, m+1] }); setYear(m+1); };
-  const addWish = () => save({ ...data, wishes: [...(data.wishes||[]), emptyWish()] });
+  const addWish = () => {
+    const w = emptyWish();
+    save({ ...data, wishes: [...(data.wishes||[]), w] });
+    return w.id;
+  };
   const updateWishes = w => save({ ...data, wishes: w });
   const deleteWish = id => save({ ...data, wishes: (data.wishes||[]).filter(w => w.id!==id) });
 
@@ -2399,7 +2503,7 @@ export default function App() {
           </div>
         )}
         {view==="stats" && <StatsView books={yearBooks} />}
-        {view==="wishlist" && <WishlistView wishes={data.wishes||[]} onUpdate={updateWishes} onAdd={addWish} onDelete={deleteWish} onStartReading={startReading} />}
+        {view==="wishlist" && <WishlistView wishes={data.wishes||[]} onUpdate={updateWishes} onAdd={addWish} onDelete={deleteWish} onStartReading={startReading} allBooks={data.books||[]} />}
         {view==="bookclub" && <BookClubView />}
       </div>
 
