@@ -692,13 +692,14 @@ function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading, allBo
   // Touch drag reorder
   const touchState = useRef({ startY: 0, idx: -1, moved: false });
   const handleTouchStart = (i, e) => {
+    e.preventDefault(); // Prevent text selection
     touchState.current = { startY: e.touches[0].clientY, idx: i, moved: false };
     setDragIdx(i);
   };
   const handleTouchMove = (e) => {
     if (dragIdx === null) return;
     const dy = e.touches[0].clientY - touchState.current.startY;
-    const itemH = 100;
+    const itemH = 80;
     const steps = Math.round(dy / itemH);
     if (steps !== 0) {
       const newIdx = Math.max(0, Math.min(wishes.length - 1, touchState.current.idx + steps));
@@ -736,16 +737,18 @@ function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading, allBo
             const isDragging = dragIdx === i;
             return (
               <div key={wish.id} ref={el => itemRefs.current[wish.id] = el}
+                onTouchStart={e => { if (!isE) handleTouchStart(i, e); }}
                 style={{ background: isDragging ? colors.wishSoft : colors.card, borderRadius: 14, padding: 14,
                 border: `1.5px solid ${isDragging ? colors.wish : colors.border}`, display: "flex", gap: 12, alignItems: "flex-start",
                 transition: isDragging ? "none" : "all .2s", transform: isDragging ? "scale(1.02)" : "none",
-                boxShadow: isDragging ? `0 6px 20px ${colors.shadow}` : "none" }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0 }}
-                  onTouchStart={e => handleTouchStart(i, e)}>
+                boxShadow: isDragging ? `0 6px 20px ${colors.shadow}` : "none",
+                userSelect: isE ? "auto" : "none", WebkitUserSelect: isE ? "auto" : "none",
+                touchAction: isE ? "auto" : "pan-x" }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0 }}>
                   <button onClick={() => moveItem(i,-1)} disabled={i===0} style={{ background: "none", border: "none", fontSize: 14,
                     cursor: i===0?"default":"pointer", color: i===0?colors.border:colors.textMuted, padding: "2px 4px", lineHeight: 1 }}>▲</button>
                   <div style={{ width: 26, height: 26, borderRadius: "50%", background: colors.wishSoft, display: "flex",
-                    alignItems: "center", justifyContent: "center", fontFamily: fonts.display, fontSize: 13, fontWeight: 700, color: colors.wishDark, touchAction: "none" }}>{i+1}</div>
+                    alignItems: "center", justifyContent: "center", fontFamily: fonts.display, fontSize: 13, fontWeight: 700, color: colors.wishDark }}>{i+1}</div>
                   <button onClick={() => moveItem(i,1)} disabled={i===wishes.length-1} style={{ background: "none", border: "none", fontSize: 14,
                     cursor: i===wishes.length-1?"default":"pointer", color: i===wishes.length-1?colors.border:colors.textMuted, padding: "2px 4px", lineHeight: 1 }}>▼</button>
                 </div>
@@ -1444,9 +1447,10 @@ function BookClubView() {
   const addNomination = async (nom) => {
     const n = { id: rid(), title: nom.title, author: nom.author, coverUrl: nom.coverUrl || "",
       genre: nom.genre || "", addedBy: profile.name, votes: [], alreadyRead: [] };
-    await saveClub({ ...club, nominations: [...(club.nominations || []), n] });
-    setNomDraft({ title: "", author: "", coverUrl: "", genre: "" });
+    // Close form immediately for visual feedback
     setShowAddNom(false);
+    setNomDraft({ title: "", author: "", coverUrl: "", genre: "" });
+    await saveClub({ ...club, nominations: [...(club.nominations || []), n] });
   };
 
   const toggleVote = async (nomId) => {
@@ -1467,6 +1471,11 @@ function BookClubView() {
     const noms = (club.nominations || []).map(n =>
       n.id === nomId ? { ...n, alreadyRead: [...(n.alreadyRead || []), profile.id] } : n
     );
+    await saveClub({ ...club, nominations: noms });
+  };
+
+  const removeNomination = async (nomId) => {
+    const noms = (club.nominations || []).filter(n => n.id !== nomId);
     await saveClub({ ...club, nominations: noms });
   };
 
@@ -1740,22 +1749,19 @@ function BookClubView() {
           {showAddNom && (
             <div style={{ background: colors.card, borderRadius: 14, padding: 16, marginBottom: 16,
               border: `1.5px solid ${colors.club}` }}>
-              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                <button onClick={() => setShowNomSearch(true)}
-                  style={{ background: colors.clubSoft, border: `1.5px solid ${colors.club}`, borderRadius: 14,
-                    padding: "6px 12px", fontFamily: fonts.body, fontSize: 11, fontWeight: 600,
-                    color: colors.clubDark, cursor: "pointer" }}>🔍 Buscar</button>
+              <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                 <button onClick={() => setShowWishPick(true)}
                   style={{ background: colors.wishSoft, border: `1.5px solid ${colors.wish}`, borderRadius: 14,
                     padding: "6px 12px", fontFamily: fonts.body, fontSize: 11, fontWeight: 600,
                     color: colors.wishDark, cursor: "pointer" }}>📋 Da Wishlist</button>
-                <button onClick={() => { const inp = document.createElement("input"); inp.type="file"; inp.accept="image/*";
-                  inp.onchange = (ev) => { const f = ev.target.files?.[0]; if (!f) return;
-                    compressImage(f).then(url => setNomDraft(d => ({ ...d, coverUrl: url }))); };
-                  inp.click(); }}
+                <button onClick={() => setShowNomSearch(true)}
                   style={{ background: colors.clubSoft, border: `1.5px solid ${colors.club}`, borderRadius: 14,
                     padding: "6px 12px", fontFamily: fonts.body, fontSize: 11, fontWeight: 600,
-                    color: colors.clubDark, cursor: "pointer" }}>📷 Capa</button>
+                    color: colors.clubDark, cursor: "pointer" }}>🔍 Buscar</button>
+                <button onClick={() => { setNomDraft({ title: "", author: "", coverUrl: "", genre: "" }); }}
+                  style={{ background: colors.clubSoft, border: `1.5px solid ${colors.club}`, borderRadius: 14,
+                    padding: "6px 12px", fontFamily: fonts.body, fontSize: 11, fontWeight: 600,
+                    color: colors.clubDark, cursor: "pointer" }}>+ Manual</button>
               </div>
 
               <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
@@ -1833,7 +1839,7 @@ function BookClubView() {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {nominations.map((n, i) => {
+              {nominations.slice(0, 3).map((n, i) => {
                 const voteCount = (n.votes || []).length;
                 const hasVoted = (n.votes || []).includes(profile.id);
                 return (
@@ -1868,9 +1874,16 @@ function BookClubView() {
                             ))}
                           </div>
                         )}
-                        <p style={{ fontFamily: fonts.body, fontSize: 10, color: colors.textLight, margin: "4px 0 0" }}>
-                          Indicado por {n.addedBy}
-                        </p>
+                        <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
+                          <span style={{ fontFamily: fonts.body, fontSize: 10, color: colors.textLight }}>
+                            Indicado por {n.addedBy}
+                          </span>
+                          <button onClick={() => removeNomination(n.id)}
+                            style={{ background: "none", border: "none", fontFamily: fonts.body,
+                              fontSize: 9, color: colors.roseDark, cursor: "pointer", padding: 0 }}>
+                            ✕ Tirar
+                          </button>
+                        </div>
                       </div>
 
                       {/* Vote button */}
@@ -1895,6 +1908,11 @@ function BookClubView() {
                   </div>
                 );
               })}
+              {nominations.length > 3 && (
+                <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textLight, textAlign: "center", margin: "4px 0 0" }}>
+                  +{nominations.length - 3} livro{nominations.length - 3 > 1 ? "s" : ""} indicado{nominations.length - 3 > 1 ? "s" : ""}
+                </p>
+              )}
             </div>
           )}
 
@@ -1975,7 +1993,7 @@ function BookClubView() {
             <button onClick={() => fileRef.current?.click()}
               style={{ background: colors.clubSoft, border: `1.5px solid ${colors.club}`, borderRadius: 16,
                 padding: "8px 16px", fontFamily: fonts.body, fontSize: 12, fontWeight: 600, color: colors.clubDark, cursor: "pointer" }}>
-              📷 Upload capa
+              + Manual
             </button>
             <input ref={fileRef} type="file" accept="image/*" onChange={handleBookCover} style={{ display: "none" }} />
           </div>
