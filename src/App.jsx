@@ -1839,7 +1839,7 @@ function BookClubView() {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {nominations.slice(0, 3).map((n, i) => {
+              {nominations.map((n, i) => {
                 const voteCount = (n.votes || []).length;
                 const hasVoted = (n.votes || []).includes(profile.id);
                 return (
@@ -1908,11 +1908,6 @@ function BookClubView() {
                   </div>
                 );
               })}
-              {nominations.length > 3 && (
-                <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textLight, textAlign: "center", margin: "4px 0 0" }}>
-                  +{nominations.length - 3} livro{nominations.length - 3 > 1 ? "s" : ""} indicado{nominations.length - 3 > 1 ? "s" : ""}
-                </p>
-              )}
             </div>
           )}
 
@@ -2005,7 +2000,7 @@ function BookClubView() {
               <p style={{ fontFamily: fonts.body, fontSize: 11, fontWeight: 700, color: colors.textMuted,
                 textTransform: "uppercase", letterSpacing: .6, margin: "0 0 10px" }}>🗳️ Da votação ({nominations.length})</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {nominations.slice(0, 5).map(n => (
+                {nominations.slice(0, 3).map(n => (
                   <button key={n.id} onClick={() => {
                     setBookDraft({ title: n.title, author: n.author || "", coverUrl: n.coverUrl || "", pages: "", genre: n.genre || "" });
                   }}
