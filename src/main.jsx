@@ -13,7 +13,10 @@ function AuthWrapper() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUser(u || null));
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u || null);
+      window.firebaseUid = u?.uid || null;
+    });
     return unsub;
   }, []);
 
