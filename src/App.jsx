@@ -2244,6 +2244,172 @@ function BookClubView() {
   );
 }
 
+/* ── FRIENDS VIEW ── */
+function FriendsView({ community, currentUid, onViewProfile, loading }) {
+  const others = community.filter(p => p.uid !== currentUid)
+    .sort((a, b) => (b.lastActive || "").localeCompare(a.lastActive || ""));
+
+  return (
+    <div style={{ padding: "0 20px 100px", maxWidth: 650, margin: "0 auto" }}>
+      <h2 style={{ fontFamily: fonts.display, fontSize: 22, color: colors.text, margin: "0 0 6px", fontStyle: "italic" }}>
+        👯 Amigas leitoras
+      </h2>
+      <p style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted, margin: "0 0 20px" }}>
+        Explore as bibliotecas das outras leitoras
+      </p>
+
+      {loading && (
+        <p style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, textAlign: "center", padding: 20 }}>
+          Carregando perfil...
+        </p>
+      )}
+
+      {others.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "40px 20px", color: colors.textMuted, fontFamily: fonts.body }}>
+          <div style={{ fontSize: 42, marginBottom: 12, opacity: .4 }}>👯</div>
+          <p style={{ fontSize: 14 }}>Ainda não há outras leitoras</p>
+          <p style={{ fontSize: 12, color: colors.textLight }}>Convide suas amigas para usarem o app!</p>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {others.map(p => (
+            <div key={p.uid} onClick={() => onViewProfile(p)}
+              style={{ background: colors.card, borderRadius: 14, padding: 14, cursor: "pointer",
+                border: `1.5px solid ${colors.border}`, display: "flex", gap: 14, alignItems: "center",
+                transition: "all .2s" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = colors.accent; e.currentTarget.style.transform = "translateY(-1px)"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.transform = "translateY(0)"; }}>
+              <div style={{ width: 52, height: 52, borderRadius: "50%",
+                background: p.photo ? `url(${p.photo}) center/cover` : `linear-gradient(135deg,${colors.accent},${colors.accentDark})`,
+                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                color: "#fff", fontFamily: fonts.display, fontSize: 20, fontWeight: 700 }}>
+                {!p.photo && (p.name || "?").charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontFamily: fonts.display, fontSize: 16, fontWeight: 700, color: colors.text, margin: 0, fontStyle: "italic" }}>
+                  {p.name || "Leitora"}
+                </p>
+                <div style={{ display: "flex", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted }}>
+                    📚 {p.readCount || 0} lidos
+                  </span>
+                  <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted }}>
+                    📋 {p.wishesCount || 0} na wishlist
+                  </span>
+                  {p.favoriteCount > 0 && (
+                    <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.roseDark }}>
+                      💜 {p.favoriteCount} recomenda
+                    </span>
+                  )}
+                </div>
+              </div>
+              <span style={{ color: colors.textLight, fontSize: 20 }}>›</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── FRIEND PROFILE VIEW (read-only) ── */
+function FriendProfileView({ profile, data, onBack, onSelectBook }) {
+  const [tab, setTab] = useState("library");
+  const books = data?.books || [];
+  const wishes = data?.wishes || [];
+  const favorites = books.filter(b => b.favorite && b.status !== "wishlist");
+  const readBooks = books.filter(b => b.status === "read");
+
+  const displayBooks = tab === "library" ? readBooks
+    : tab === "wishlist" ? wishes
+    : tab === "recommends" ? favorites
+    : [];
+
+  return (
+    <div style={{ padding: "0 20px 100px", maxWidth: 650, margin: "0 auto" }}>
+      <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 14, color: colors.accent,
+        cursor: "pointer", fontFamily: fonts.body, fontWeight: 600, padding: "8px 0", marginBottom: 12 }}>
+        ← Voltar para Amigas
+      </button>
+
+      {/* Profile header */}
+      <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 24,
+        padding: 18, background: `linear-gradient(135deg, ${colors.accentSoft}, ${colors.card})`,
+        borderRadius: 16, border: `1px solid ${colors.accentLight}` }}>
+        <div style={{ width: 68, height: 68, borderRadius: "50%",
+          background: profile.photo ? `url(${profile.photo}) center/cover` : `linear-gradient(135deg,${colors.accent},${colors.accentDark})`,
+          flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+          color: "#fff", fontFamily: fonts.display, fontSize: 28, fontWeight: 700,
+          boxShadow: `0 4px 14px ${colors.shadow}` }}>
+          {!profile.photo && (profile.name || "?").charAt(0).toUpperCase()}
+        </div>
+        <div style={{ flex: 1 }}>
+          <h2 style={{ fontFamily: fonts.display, fontSize: 22, color: colors.text, margin: 0, fontStyle: "italic" }}>
+            {profile.name}
+          </h2>
+          <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap" }}>
+            <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted }}>
+              📚 {readBooks.length} livros
+            </span>
+            <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted }}>
+              📋 {wishes.length} wishlist
+            </span>
+            <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.roseDark }}>
+              💜 {favorites.length} recomenda
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${colors.border}`, marginBottom: 18 }}>
+        {[
+          { k: "library", l: "Biblioteca", i: "📚" },
+          { k: "recommends", l: "Recomenda", i: "💜" },
+          { k: "wishlist", l: "Wishlist", i: "📋" },
+        ].map(t => (
+          <button key={t.k} onClick={() => setTab(t.k)}
+            style={{ background: "none", border: "none",
+              borderBottom: tab === t.k ? `2px solid ${colors.accent}` : "2px solid transparent",
+              padding: "9px 14px", fontFamily: fonts.body, fontSize: 13,
+              fontWeight: tab === t.k ? 600 : 400,
+              color: tab === t.k ? colors.accent : colors.textMuted,
+              cursor: "pointer", marginBottom: -1 }}>{t.i} {t.l}</button>
+        ))}
+      </div>
+
+      {/* Content */}
+      {displayBooks.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "40px 20px", color: colors.textMuted, fontFamily: fonts.body }}>
+          <div style={{ fontSize: 42, marginBottom: 12, opacity: .4 }}>
+            {tab === "library" ? "📚" : tab === "recommends" ? "💜" : "📋"}
+          </div>
+          <p style={{ fontSize: 13 }}>
+            {tab === "library" ? "Nenhum livro lido ainda" : tab === "recommends" ? "Nenhuma recomendação ainda" : "Wishlist vazia"}
+          </p>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(110px,1fr))", gap: 16, justifyItems: "center" }}>
+          {displayBooks.map(book => (
+            <div key={book.id} style={{ textAlign: "left", width: "100%", maxWidth: 120 }}>
+              <Cover book={book} w={110} h={158} showBadge={tab === "library"} />
+              {tab === "library" && (
+                <div style={{ marginTop: 6 }}><Stars rating={book.rating} size={12} interactive={false} /></div>
+              )}
+              <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.text, fontWeight: 600, marginTop: 4,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.title || "Sem título"}</p>
+              {book.author && (
+                <p style={{ fontFamily: fonts.body, fontSize: 10, color: colors.textMuted, margin: 0,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.author}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── MAIN APP ── */
 export default function App() {
   const [data, setData] = useState({ books: [], wishes: [], years: [2022,2023,2024,2025,2026] });
@@ -2257,12 +2423,34 @@ export default function App() {
   const [showSearchBar, setShowSearchBar] = useState(false);
   const [showBackup, setShowBackup] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [community, setCommunity] = useState([]);
+  const [viewingUser, setViewingUser] = useState(null); // {profile, data}
+  const [loadingProfile, setLoadingProfile] = useState(false);
   const importRef = useRef(null);
 
   useEffect(() => { (async () => {
     try { const r = await window.storage.get(STORAGE_KEY); if (r?.value) setData(JSON.parse(r.value)); } catch(e) {}
+    // Load community in background
+    try {
+      if (window.storage.getCommunity) {
+        const list = await window.storage.getCommunity();
+        setCommunity(list);
+      }
+    } catch(e) {}
     setLoaded(true);
   })(); }, []);
+
+  const loadUserProfile = async (profile) => {
+    setLoadingProfile(true);
+    try {
+      if (window.storage.getUserData) {
+        const userData = await window.storage.getUserData(profile.uid);
+        setViewingUser({ profile, data: userData });
+        setView("friendProfile");
+      }
+    } catch(e) { console.error(e); }
+    setLoadingProfile(false);
+  };
 
   const save = useCallback(async d => {
     setData(d);
@@ -2443,6 +2631,16 @@ export default function App() {
               <Logo height={22} />
             </div>
 
+            {/* Friends */}
+            <button onClick={() => { setView("friends"); setShowMenu(false); }}
+              style={{ width: "100%", background: view === "friends" ? colors.accentSoft : "transparent",
+                border: "none", borderRadius: 12, padding: "12px 14px", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 10, marginBottom: 6,
+                fontFamily: fonts.body, fontSize: 14, fontWeight: view === "friends" ? 600 : 400,
+                color: view === "friends" ? colors.accentDark : colors.text, textAlign: "left" }}>
+              <span style={{ fontSize: 18 }}>👯</span> Amigas
+            </button>
+
             {/* Stats */}
             <button onClick={() => { setView("stats"); setShowMenu(false); }}
               style={{ width: "100%", background: view === "stats" ? colors.accentSoft : "transparent",
@@ -2518,9 +2716,11 @@ export default function App() {
         {view==="stats" && <StatsView books={yearBooks} />}
         {view==="wishlist" && <WishlistView wishes={data.wishes||[]} onUpdate={updateWishes} onAdd={addWish} onDelete={deleteWish} onStartReading={startReading} allBooks={data.books||[]} />}
         {view==="bookclub" && <BookClubView />}
+        {view==="friends" && <FriendsView community={community} currentUid={window.firebaseUid} onViewProfile={loadUserProfile} loading={loadingProfile} />}
+        {view==="friendProfile" && viewingUser && <FriendProfileView profile={viewingUser.profile} data={viewingUser.data} onBack={() => { setViewingUser(null); setView("friends"); }} />}
       </div>
 
-      {(view==="library"||view==="stats") && <FAB onClick={() => addBook()}>+</FAB>}
+      {view==="library" && <FAB onClick={() => addBook()}>+</FAB>}
     </div>
   );
 }
