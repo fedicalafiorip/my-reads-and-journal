@@ -1,29 +1,35 @@
-// Storage adapter v3
-// Splits book data across multiple Firestore documents to avoid 1MB limit
+// Storage adapter v4 - with community features
 // Personal data → Firestore: users/{uid}/data/{key}
 // Shared data (Book Club) → Firestore: bookclub/state
+// Community registry → Firestore: community/profiles/users/{uid}
 
 import { db, auth } from "./firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
 
 const MAIN_KEY = "bookjournal-v4";
 
-// Split large data into separate Firestore docs
 async function savePersonalData(uid, key, value) {
   const data = typeof value === "string" ? JSON.parse(value) : value;
 
   if (key === MAIN_KEY) {
-    // Split into separate docs: meta, books, wishes
     const meta = { years: data.years || [] };
     const books = data.books || [];
     const wishes = data.wishes || [];
 
-    // Save in parallel
     await Promise.all([
       setDoc(doc(db, "users", uid, "data", "meta"), meta),
       setDoc(doc(db, "users", uid, "data", "books"), { items: books }),
       setDoc(doc(db, "users", uid, "data", "wishes"), { items: wishes }),
     ]);
+
+    // Update community profile with stats
+    updateCommunityProfile(uid, {
+      booksCount: books.length,
+      wishesCount: wishes.length,
+      readCount: books.filter(b => b.status === "read").length,
+      favoriteCount: books.filter(b => b.favorite).length,
+      lastActive: new Date().toISOString(),
+    }).catch(e => console.warn("Community profile update failed:", e));
   } else {
     await setDoc(doc(db, "users", uid, "data", key), data);
   }
@@ -31,7 +37,6 @@ async function savePersonalData(uid, key, value) {
 
 async function loadPersonalData(uid, key) {
   if (key === MAIN_KEY) {
-    // Try new split format first
     try {
       const [metaSnap, booksSnap, wishesSnap] = await Promise.all([
         getDoc(doc(db, "users", uid, "data", "meta")),
@@ -46,27 +51,65 @@ async function loadPersonalData(uid, key) {
         return { years: meta.years || [], books, wishes };
       }
     } catch (e) {
-      console.warn("Split load failed, trying legacy:", e);
+      console.warn("Split load failed:", e);
     }
 
-    // Fallback: try legacy single-doc format
     try {
       const snap = await getDoc(doc(db, "users", uid, "data", key));
       if (snap.exists()) {
         const legacyData = snap.data();
-        // Migrate to split format in background
         savePersonalData(uid, key, legacyData).catch(() => {});
         return legacyData;
       }
     } catch (e) {
-      console.warn("Legacy load also failed:", e);
+      console.warn("Legacy load failed:", e);
     }
-
     return null;
   }
 
   const snap = await getDoc(doc(db, "users", uid, "data", key));
   return snap.exists() ? snap.data() : null;
+}
+
+async function updateCommunityProfile(uid, stats) {
+  const user = auth.currentUser;
+  if (!user) return;
+  const profile = {
+    uid,
+    name: user.displayName || "Leitora",
+    email: user.email || "",
+    photo: user.photoURL || "",
+    ...stats,
+  };
+  await setDoc(doc(db, "community", "profiles", "users", uid), profile, { merge: true });
+}
+
+async function getAllCommunityProfiles() {
+  try {
+    const snap = await getDocs(collection(db, "community", "profiles", "users"));
+    return snap.docs.map(d => d.data());
+  } catch (e) {
+    console.error("Failed to load community profiles:", e);
+    return [];
+  }
+}
+
+async function loadOtherUserData(otherUid) {
+  try {
+    const [metaSnap, booksSnap, wishesSnap] = await Promise.all([
+      getDoc(doc(db, "users", otherUid, "data", "meta")),
+      getDoc(doc(db, "users", otherUid, "data", "books")),
+      getDoc(doc(db, "users", otherUid, "data", "wishes")),
+    ]);
+    return {
+      years: metaSnap.exists() ? metaSnap.data().years || [] : [],
+      books: booksSnap.exists() ? booksSnap.data().items || [] : [],
+      wishes: wishesSnap.exists() ? wishesSnap.data().items || [] : [],
+    };
+  } catch (e) {
+    console.error("Failed to load other user data:", e);
+    return null;
+  }
 }
 
 const storage = {
@@ -91,10 +134,9 @@ const storage = {
       const data = await loadPersonalData(uid, key);
       if (data) {
         const value = JSON.stringify(data);
-        localStorage.setItem(key, value); // cache locally
+        localStorage.setItem(key, value);
         return { key, value, shared: false };
       }
-      // Migration: check localStorage for existing data
       const localValue = localStorage.getItem(key);
       if (localValue) {
         const parsed = JSON.parse(localValue);
@@ -133,7 +175,6 @@ const storage = {
       return { key, value, shared: false };
     } catch (e) {
       console.error("Firebase personal set error:", e);
-      // Fallback: save locally
       try { localStorage.setItem(key, typeof value === "string" ? value : JSON.stringify(value)); } catch (e2) {}
       return null;
     }
@@ -146,7 +187,16 @@ const storage = {
 
   async list(prefix = "", shared = false) {
     return { keys: [], prefix, shared };
-  }
+  },
+
+  // Community methods
+  async getCommunity() {
+    return await getAllCommunityProfiles();
+  },
+
+  async getUserData(otherUid) {
+    return await loadOtherUserData(otherUid);
+  },
 };
 
 window.storage = storage;
