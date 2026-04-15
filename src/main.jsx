@@ -16,6 +16,10 @@ function AuthWrapper() {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u || null);
       window.firebaseUid = u?.uid || null;
+      // Register in community so friends can see this user
+      if (u && window.storage?.registerInCommunity) {
+        window.storage.registerInCommunity().catch(() => {});
+      }
     });
     return unsub;
   }, []);
