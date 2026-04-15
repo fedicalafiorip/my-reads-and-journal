@@ -71,7 +71,7 @@ async function loadPersonalData(uid, key) {
   return snap.exists() ? snap.data() : null;
 }
 
-async function updateCommunityProfile(uid, stats) {
+async function updateCommunityProfile(uid, stats = {}) {
   const user = auth.currentUser;
   if (!user) return;
   const profile = {
@@ -82,6 +82,32 @@ async function updateCommunityProfile(uid, stats) {
     ...stats,
   };
   await setDoc(doc(db, "community", "profiles", "users", uid), profile, { merge: true });
+}
+
+// Register user in community on login (even if they haven't saved anything yet)
+async function registerInCommunity() {
+  const user = auth.currentUser;
+  if (!user) return;
+  try {
+    // Check if profile already exists to avoid overwriting stats
+    const existing = await getDoc(doc(db, "community", "profiles", "users", user.uid));
+    if (!existing.exists()) {
+      await updateCommunityProfile(user.uid, {
+        booksCount: 0,
+        wishesCount: 0,
+        readCount: 0,
+        favoriteCount: 0,
+        lastActive: new Date().toISOString(),
+      });
+    } else {
+      // Just update name/photo/lastActive
+      await updateCommunityProfile(user.uid, {
+        lastActive: new Date().toISOString(),
+      });
+    }
+  } catch(e) {
+    console.warn("Community registration failed:", e);
+  }
 }
 
 async function getAllCommunityProfiles() {
@@ -196,6 +222,10 @@ const storage = {
 
   async getUserData(otherUid) {
     return await loadOtherUserData(otherUid);
+  },
+
+  async registerInCommunity() {
+    return await registerInCommunity();
   },
 };
 
