@@ -1276,14 +1276,27 @@ function BookClubView() {
   // Load data
   useEffect(() => {
     (async () => {
+      let loadedProfile = null;
       try {
         const p = await window.storage.get("bookclub-profile");
-        if (p?.value) { const pd = JSON.parse(p.value); setProfile(pd); setProfileDraft(pd); }
+        if (p?.value) { loadedProfile = JSON.parse(p.value); setProfile(loadedProfile); setProfileDraft(loadedProfile); }
       } catch(e) {}
+      let loadedClub = { currentBook: null, members: {}, updates: [] };
       try {
         const c = await window.storage.get("bookclub-state", true);
-        if (c?.value) setClub(JSON.parse(c.value));
+        if (c?.value) { loadedClub = JSON.parse(c.value); setClub(loadedClub); }
       } catch(e) {}
+
+      // Auto-ensure current profile is in members list
+      if (loadedProfile && loadedProfile.id) {
+        const members = loadedClub.members || {};
+        if (!members[loadedProfile.id]) {
+          const updated = { ...loadedClub, members: { ...members,
+            [loadedProfile.id]: { name: loadedProfile.name, photo: loadedProfile.photo, joinedAt: loadedProfile.joinedAt || new Date().toISOString() } } };
+          setClub(updated);
+          try { await window.storage.set("bookclub-state", JSON.stringify(updated), true); } catch(e) {}
+        }
+      }
       setLoaded(true);
     })();
   }, []);
