@@ -1538,9 +1538,9 @@ function BookClubView() {
                   fontFamily: fonts.body, fontSize: 11, cursor: "pointer", fontWeight: 600, padding: 0 }}>Trocar livro →</button>
             </div>
             {/* Mini ranking */}
-            {podium.length > 0 && podium.some(p => p.progress > 0) && (
+            {podium.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0, alignItems: "center" }}>
-                {podium.filter(p => p.progress > 0).map((m, i) => (
+                {podium.map((m, i) => (
                   <div key={m.name} style={{ display: "flex", alignItems: "center", gap: 5 }}>
                     <div style={{ position: "relative" }}>
                       <div style={{ width: 28, height: 28, borderRadius: "50%",
@@ -2245,12 +2245,16 @@ function BookClubView() {
 }
 
 /* ── FRIENDS VIEW ── */
-function FriendsView({ community, currentUid, onViewProfile, loading }) {
+function FriendsView({ community, currentUid, onViewProfile, loading, onBack }) {
   const others = community.filter(p => p.uid !== currentUid)
     .sort((a, b) => (b.lastActive || "").localeCompare(a.lastActive || ""));
 
   return (
     <div style={{ padding: "0 20px 100px", maxWidth: 650, margin: "0 auto" }}>
+      <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 14, color: colors.accent,
+        cursor: "pointer", fontFamily: fonts.body, fontWeight: 600, padding: "8px 0", marginBottom: 8 }}>
+        ← Voltar para Biblioteca
+      </button>
       <h2 style={{ fontFamily: fonts.display, fontSize: 22, color: colors.text, margin: "0 0 6px", fontStyle: "italic" }}>
         👯 Amigas leitoras
       </h2>
@@ -2631,6 +2635,16 @@ export default function App() {
               <Logo height={22} />
             </div>
 
+            {/* Minha Biblioteca */}
+            <button onClick={() => { setView("library"); setShowMenu(false); }}
+              style={{ width: "100%", background: view === "library" ? colors.accentSoft : "transparent",
+                border: "none", borderRadius: 12, padding: "12px 14px", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 10, marginBottom: 6,
+                fontFamily: fonts.body, fontSize: 14, fontWeight: view === "library" ? 600 : 400,
+                color: view === "library" ? colors.accentDark : colors.text, textAlign: "left" }}>
+              <span style={{ fontSize: 18 }}>📚</span> Minha Biblioteca
+            </button>
+
             {/* Friends */}
             <button onClick={() => { setView("friends"); setShowMenu(false); }}
               style={{ width: "100%", background: view === "friends" ? colors.accentSoft : "transparent",
@@ -2716,7 +2730,7 @@ export default function App() {
         {view==="stats" && <StatsView books={yearBooks} />}
         {view==="wishlist" && <WishlistView wishes={data.wishes||[]} onUpdate={updateWishes} onAdd={addWish} onDelete={deleteWish} onStartReading={startReading} allBooks={data.books||[]} />}
         {view==="bookclub" && <BookClubView />}
-        {view==="friends" && <FriendsView community={community} currentUid={window.firebaseUid} onViewProfile={loadUserProfile} loading={loadingProfile} />}
+        {view==="friends" && <FriendsView community={community} currentUid={window.firebaseUid} onViewProfile={loadUserProfile} loading={loadingProfile} onBack={() => setView("library")} />}
         {view==="friendProfile" && viewingUser && <FriendProfileView profile={viewingUser.profile} data={viewingUser.data} onBack={() => { setViewingUser(null); setView("friends"); }} />}
       </div>
 
