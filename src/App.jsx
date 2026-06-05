@@ -2469,27 +2469,18 @@ export default function App() {
     setLoadingProfile(false);
   };
 
+  const [saveStatus, setSaveStatus] = useState(""); // "", "saving", "saved", "error"
   const save = useCallback(async d => {
     setData(d);
+    setSaveStatus("saving");
     try {
       await window.storage.set(STORAGE_KEY, JSON.stringify(d));
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus(""), 2000);
     } catch(e) {
-      console.error("Save failed, retrying without large covers:", e);
-      // If save fails (likely Firestore 1MB limit), strip large base64 covers and retry
-      try {
-        const lite = { ...d, books: (d.books||[]).map(b => {
-          if (b.coverUrl && b.coverUrl.startsWith("data:") && b.coverUrl.length > 50000) {
-            return { ...b, coverUrl: "" };
-          }
-          return b;
-        }), wishes: (d.wishes||[]).map(w => {
-          if (w.coverUrl && w.coverUrl.startsWith("data:") && w.coverUrl.length > 50000) {
-            return { ...w, coverUrl: "" };
-          }
-          return w;
-        })};
-        await window.storage.set(STORAGE_KEY, JSON.stringify(lite));
-      } catch(e2) { console.error("Save lite also failed:", e2); }
+      console.error("Save failed:", e);
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus(""), 4000);
     }
   }, []);
 
@@ -2578,7 +2569,17 @@ export default function App() {
       <div style={{ padding: "16px 20px 0", position: "sticky", top: 0, background: `${colors.bg}f0`,
         backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Logo height={42} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Logo height={42} />
+            {saveStatus && (
+              <span style={{ fontFamily: fonts.body, fontSize: 9, padding: "2px 8px", borderRadius: 8,
+                background: saveStatus === "saved" ? colors.greenLight : saveStatus === "error" ? colors.roseLight : colors.accentSoft,
+                color: saveStatus === "saved" ? colors.green : saveStatus === "error" ? colors.roseDark : colors.accent,
+                fontWeight: 600, animation: "bjFade .2s ease" }}>
+                {saveStatus === "saving" ? "Salvando..." : saveStatus === "saved" ? "✓ Salvo" : "⚠ Erro ao salvar"}
+              </span>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             {view==="library" && (
               <button onClick={() => { setShowSearchBar(!showSearchBar); setSearchQ(""); }}
