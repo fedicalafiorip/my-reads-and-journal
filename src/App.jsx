@@ -870,7 +870,7 @@ function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading, allBo
                               <span key={g} style={{ display: "inline-block", background: colors.wishSoft, color: colors.wishDark,
                                 fontSize: 10, fontFamily: fonts.body, fontWeight: 600, padding: "2px 8px", borderRadius: 8 }}>{g}</span>))}
                           </div>)}
-                          {wish.note && <p style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, margin: "6px 0 0", lineHeight: 1.5 }}>{wish.note}</p>}
+                          {wish.note && <p style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted, margin: "6px 0 0", lineHeight: 1.5 }}>{wish.note}</p>}
                         </div>
                         <div style={{ marginTop: 8 }}>{startBtn(wish)}</div>
                       </>
@@ -1168,7 +1168,7 @@ function ReviewPage({ book, onUpdate, onDelete, onBack, allBooks, onMoveToWishli
           <label style={{ fontFamily: fonts.display, fontSize: 15, color: colors.accentDark, fontStyle: "italic", fontWeight: 600 }}>Citação Favorita</label>
         </div>
         <textarea value={b.quote} onChange={e => set("quote",e.target.value)} placeholder="A frase que mais te impactou..."
-          style={{ fontFamily: fonts.hand, fontSize: 18, color: colors.text, border: "none", background: "transparent",
+          style={{ fontFamily: fonts.hand, fontSize: 14, color: colors.text, border: "none", background: "transparent",
             width: "100%", minHeight: 50, resize: "vertical", outline: "none", lineHeight: 1.5 }} />
         <div style={{ textAlign: "right" }}><span style={{ fontSize: 24, color: colors.accent, fontFamily: "serif" }}>❞</span></div>
       </div>
@@ -1181,7 +1181,7 @@ function ReviewPage({ book, onUpdate, onDelete, onBack, allBooks, onMoveToWishli
             backgroundImage: `repeating-linear-gradient(transparent,transparent 31px,${colors.line} 31px,${colors.line} 32px)`,
             backgroundSize: "100% 32px", opacity: .5, pointerEvents: "none" }} />
           <textarea value={b.review} onChange={e => set("review",e.target.value)} placeholder="O que você achou do livro?"
-            style={{ fontFamily: fonts.hand, fontSize: 18, color: colors.text, border: "none", background: "transparent",
+            style={{ fontFamily: fonts.hand, fontSize: 14, color: colors.text, border: "none", background: "transparent",
               width: "100%", minHeight: 250, resize: "vertical", outline: "none", lineHeight: "32px", padding: 0, position: "relative" }} />
         </div>
       </div>
