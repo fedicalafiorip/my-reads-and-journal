@@ -2703,6 +2703,7 @@ export default function App() {
     nb.title = wish.title; nb.author = wish.author || ""; nb.genre = wish.genre || "";
     nb.coverUrl = wish.coverUrl || ""; nb.coverColor = wish.coverColor || rcolor();
     nb.seriesName = wish.seriesName || ""; nb.seriesNumber = wish.seriesNumber || 0; nb.seriesTotal = wish.seriesTotal || 0;
+    nb.summary = wish.note || "";
     nb.status = "reading";
     const newBooks = [nb, ...data.books];
     const newWishes = (data.wishes || []).filter(w => w.id !== wish.id);
