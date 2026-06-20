@@ -1,7 +1,14 @@
-// Storage adapter v5 - ROBUST: localStorage-first, Firestore sync
+// Storage adapter v6 - ROBUST: localStorage-first, Firestore sync
 // RULE 1: Always save to localStorage FIRST (sync, instant, never fails)
 // RULE 2: Then sync to Firestore in background (async, might fail)
-// RULE 3: On load, use whichever has newer data (localStorage vs Firestore)
+// RULE 3: On load, use whichever has the actual data (a non-empty library
+//         ALWAYS beats an empty one; timestamps only break ties).
+//
+// v6 changes (data-loss fixes):
+//   (A) RECOVERY: if the new meta/books/wishes docs are empty, automatically
+//       read the legacy single document "bookjournal-v4" and migrate it forward.
+//   (B) GUARD: never overwrite an existing non-empty library with an empty one
+//       (checked at the localStorage layer, the Firestore layer, AND on load).
 
 import { db, auth } from "./firebase";
 import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
@@ -9,13 +16,48 @@ import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
 const MAIN_KEY = "bookjournal-v4";
 const TS_KEY = "bookjournal-v4-ts"; // timestamp of last local save
 
+// ── HELPERS ──
+
+function countBooks(jsonStr) {
+  if (!jsonStr) return 0;
+  try { return (JSON.parse(jsonStr).books || []).length; } catch { return 0; }
+}
+
 // ── FIRESTORE HELPERS ──
 
 async function firestoreSave(uid, data) {
   const books = data.books || [];
   const wishes = data.wishes || [];
 
-  // Strip large base64 covers before saving to Firestore
+  // ──────────────────────────────────────────────────────────────
+  // GUARD (B): never wipe an existing library with an empty save.
+  // A brand-new user (nothing stored anywhere) is still allowed to
+  // create empty docs; we only block empty-OVER-non-empty.
+  // ──────────────────────────────────────────────────────────────
+  if (books.length === 0) {
+    try {
+      const existing = await getDoc(doc(db, "users", uid, "data", "books"));
+      const existingItems = existing.exists() ? (existing.data().items || []) : [];
+
+      let legacyItems = [];
+      if (existingItems.length === 0) {
+        const legacy = await getDoc(doc(db, "users", uid, "data", MAIN_KEY));
+        legacyItems = (legacy.exists() && Array.isArray(legacy.data().books))
+          ? legacy.data().books : [];
+      }
+
+      if (existingItems.length > 0 || legacyItems.length > 0) {
+        console.warn("[storage] Blocked an empty-library save to protect existing data.");
+        return; // abort — do NOT overwrite real data with nothing
+      }
+    } catch (e) {
+      // If we can't verify what's already there, stay safe and skip the empty write.
+      console.warn("[storage] Could not verify existing data; skipping empty save to stay safe.");
+      return;
+    }
+  }
+
+  // Strip large base64 covers before saving to Firestore (1MB/doc limit).
   const cleanBooks = books.map(b => {
     if (b.coverUrl && b.coverUrl.startsWith("data:") && b.coverUrl.length > 100000) {
       return { ...b, coverUrl: "" };
@@ -52,14 +94,43 @@ async function firestoreLoad(uid) {
     getDoc(doc(db, "users", uid, "data", "wishes")),
   ]);
 
-  if (!metaSnap.exists() && !booksSnap.exists()) return null;
-
   const meta = metaSnap.exists() ? metaSnap.data() : {};
-  const books = booksSnap.exists() ? booksSnap.data().items || [] : [];
-  const wishes = wishesSnap.exists() ? wishesSnap.data().items || [] : [];
-  const savedAt = meta.savedAt || 0;
+  const books = booksSnap.exists() ? (booksSnap.data().items || []) : [];
+  const wishes = wishesSnap.exists() ? (wishesSnap.data().items || []) : [];
 
-  return { years: meta.years || [], books, wishes, _savedAt: savedAt };
+  // Normal path: the new docs already hold the library.
+  if (books.length > 0) {
+    return { years: meta.years || [], books, wishes, _savedAt: meta.savedAt || 0 };
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // RECOVERY (A): new docs are empty → fall back to the legacy single
+  // document "bookjournal-v4" and migrate it forward into the new docs.
+  // ──────────────────────────────────────────────────────────────
+  try {
+    const legacySnap = await getDoc(doc(db, "users", uid, "data", MAIN_KEY));
+    if (legacySnap.exists()) {
+      const legacy = legacySnap.data() || {};
+      const legacyBooks = Array.isArray(legacy.books) ? legacy.books : [];
+      const legacyWishes = Array.isArray(legacy.wishes) ? legacy.wishes : wishes;
+      const legacyYears = Array.isArray(legacy.years) ? legacy.years : (meta.years || []);
+
+      if (legacyBooks.length > 0 || legacyWishes.length > 0) {
+        console.log("[storage] Recovered library from legacy '" + MAIN_KEY + "' document.");
+        // Consolidate into the new docs (guarded; non-empty so it is allowed).
+        // The legacy doc is never deleted, so it stays as an extra backup.
+        firestoreSave(uid, { years: legacyYears, books: legacyBooks, wishes: legacyWishes })
+          .catch(e => console.warn("[storage] Forward migration failed (legacy doc still intact):", e));
+        return { years: legacyYears, books: legacyBooks, wishes: legacyWishes, _savedAt: Date.now() };
+      }
+    }
+  } catch (e) {
+    console.warn("[storage] Legacy recovery check failed:", e);
+  }
+
+  // Truly nothing anywhere yet.
+  if (!metaSnap.exists() && !booksSnap.exists()) return null;
+  return { years: meta.years || [], books, wishes, _savedAt: meta.savedAt || 0 };
 }
 
 // ── COMMUNITY ──
@@ -109,6 +180,7 @@ const storage = {
     const uid = auth.currentUser?.uid;
     const localValue = localStorage.getItem(key);
     const localTs = parseInt(localStorage.getItem(TS_KEY) || "0");
+    const localBooks = countBooks(localValue);
 
     if (!uid) {
       // Not logged in, use localStorage only
@@ -121,33 +193,41 @@ const storage = {
       if (remote) {
         const remoteTs = remote._savedAt || 0;
         delete remote._savedAt;
+        const remoteBooks = (remote.books || []).length;
 
-        if (localValue && localTs > remoteTs) {
-          // Local is newer - use local, sync to Firestore in background
-          console.log("Local data is newer, syncing to Firestore...");
+        // ──────────────────────────────────────────────────────────
+        // GUARD (B) on load: a non-empty library ALWAYS wins over an
+        // empty one, regardless of timestamps. Timestamps only decide
+        // ties (both non-empty, or both empty).
+        // ──────────────────────────────────────────────────────────
+        let useLocal;
+        if (remoteBooks > 0 && localBooks === 0) useLocal = false;
+        else if (localBooks > 0 && remoteBooks === 0) useLocal = true;
+        else useLocal = !!localValue && localTs > remoteTs;
+
+        if (useLocal) {
+          // Local wins - use local, sync to Firestore in background
+          console.log("Local data wins, syncing to Firestore...");
           firestoreSave(uid, JSON.parse(localValue)).catch(e =>
             console.warn("Background sync failed:", e));
           return { key, value: localValue, shared: false };
         }
 
-        // Remote is newer or same - use remote, update local cache
-        const value = JSON.stringify(remote);
-
-        // Merge: keep local covers that remote might have stripped
+        // Remote wins - use remote, refresh local cache.
+        // Merge: keep local covers that the cloud may have stripped.
+        let outValue;
         if (localValue) {
           try {
-            const localData = JSON.parse(localValue);
-            const merged = mergeCovers(remote, localData);
-            const mergedValue = JSON.stringify(merged);
-            localStorage.setItem(key, mergedValue);
-            localStorage.setItem(TS_KEY, String(remoteTs || Date.now()));
-            return { key, value: mergedValue, shared: false };
-          } catch(e) {}
+            outValue = JSON.stringify(mergeCovers(remote, JSON.parse(localValue)));
+          } catch (e) {
+            outValue = JSON.stringify(remote);
+          }
+        } else {
+          outValue = JSON.stringify(remote);
         }
-
-        localStorage.setItem(key, value);
+        localStorage.setItem(key, outValue);
         localStorage.setItem(TS_KEY, String(remoteTs || Date.now()));
-        return { key, value, shared: false };
+        return { key, value: outValue, shared: false };
       }
     } catch (e) {
       console.warn("Firestore load failed, using localStorage:", e);
@@ -155,7 +235,7 @@ const storage = {
 
     // Firestore failed or empty - use localStorage
     if (localValue) {
-      // Try to migrate local data to Firestore
+      // Try to migrate local data to Firestore (guarded inside firestoreSave)
       firestoreSave(uid, JSON.parse(localValue)).catch(() => {});
       return { key, value: localValue, shared: false };
     }
@@ -176,8 +256,22 @@ const storage = {
       }
     }
 
-    // PERSONAL - ALWAYS save to localStorage FIRST
     const strValue = typeof value === "string" ? value : JSON.stringify(value);
+
+    // ──────────────────────────────────────────────────────────────
+    // GUARD (B) at the local layer: don't let an empty library blow away
+    // a cached non-empty one (this is the classic "app boots empty and
+    // autosaves over real data" bug). New users (empty cache) pass through.
+    // ──────────────────────────────────────────────────────────────
+    if (countBooks(strValue) === 0) {
+      const cached = localStorage.getItem(key);
+      if (cached && countBooks(cached) > 0) {
+        console.warn("[storage] Blocked empty-library save (local cache has books).");
+        return { key, value: cached, shared: false };
+      }
+    }
+
+    // ALWAYS save to localStorage FIRST
     const now = Date.now();
     try {
       localStorage.setItem(key, strValue);
@@ -186,12 +280,11 @@ const storage = {
       console.error("localStorage save failed:", e);
     }
 
-    // Then sync to Firestore in background
+    // Then sync to Firestore in background (also guarded inside firestoreSave)
     const uid = auth.currentUser?.uid;
     if (uid) {
       try {
         const data = typeof value === "string" ? JSON.parse(value) : value;
-        data._savedAt = now; // Add timestamp for comparison
         await firestoreSave(uid, data);
       } catch (e) {
         console.warn("Firestore sync failed (data safe in localStorage):", e);
