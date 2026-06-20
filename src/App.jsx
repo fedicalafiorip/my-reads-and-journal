@@ -18,7 +18,7 @@ const colors = {
 const fonts = {
   display: "'Playfair Display','Georgia',serif",
   body: "'DM Sans','Helvetica Neue',sans-serif",
-  hand: "'Caveat',cursive",
+  hand: "'DM Sans','Helvetica Neue',sans-serif",
 };
 
 function Logo({ height = 24 }) {
@@ -87,7 +87,9 @@ const emptyBook = (year, seriesName = "") => ({
 
 const emptyWish = () => ({
   id: rid(), title: "", author: "", genre: "", note: "", coverUrl: "",
-  coverColor: rcolor(), createdAt: new Date().toISOString(),
+  coverColor: rcolor(),
+  seriesName: "", seriesNumber: 0, seriesTotal: 0,
+  createdAt: new Date().toISOString(),
 });
 
 const statusBadge = {
@@ -671,59 +673,162 @@ function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading, allBo
   const [showSearch, setShowSearch] = useState(false);
   const fileRefs = useRef({});
   const itemRefs = useRef({});
-  const [dragIdx, setDragIdx] = useState(null);
+  const [dragKey, setDragKey] = useState(null);
 
-  // Author autocomplete from all books
   const knownAuthors = [...new Set([...(allBooks||[]).map(b => b.author), ...wishes.map(w => w.author)].filter(Boolean))].sort();
+  const existingSeries = [...new Set([...(allBooks||[]).map(b => b.seriesName), ...wishes.map(w => w.seriesName)].filter(Boolean))];
 
-  const moveItem = (i, d) => { const n = i+d; if (n<0||n>=wishes.length) return; const a=[...wishes]; [a[i],a[n]]=[a[n],a[i]]; onUpdate(a); };
-  const updateWish = (id, f, v) => onUpdate(wishes.map(w => w.id === id ? { ...w, [f]: v } : w));
-  const handleCoverUpload = (wid, e) => { const f = e.target.files?.[0]; if (!f) return;
-    compressImage(f).then(url => updateWish(wid, "coverUrl", url)); };
-  const handleSearchSelect = (r) => { const w = emptyWish(); w.title=r.title; w.author=r.author; w.genre=r.genre; w.coverUrl=r.cover; onUpdate([...wishes,w]); setShowSearch(false); setEditingId(w.id);
-    setTimeout(() => itemRefs.current[w.id]?.scrollIntoView({ behavior: "smooth", block: "center" }), 100); };
-
-  const handleAddManual = () => {
-    const id = onAdd();
-    setEditingId(id);
-    setTimeout(() => itemRefs.current[id]?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
-  };
-
-  // Touch drag reorder
-  const touchState = useRef({ startY: 0, idx: -1, moved: false });
-  const handleTouchStart = (i, e) => {
-    e.preventDefault(); // Prevent text selection
-    touchState.current = { startY: e.touches[0].clientY, idx: i, moved: false };
-    setDragIdx(i);
-  };
-  const handleTouchMove = (e) => {
-    if (dragIdx === null) return;
-    const dy = e.touches[0].clientY - touchState.current.startY;
-    const itemH = 80;
-    const steps = Math.round(dy / itemH);
-    if (steps !== 0) {
-      const newIdx = Math.max(0, Math.min(wishes.length - 1, touchState.current.idx + steps));
-      if (newIdx !== dragIdx) {
-        const a = [...wishes]; const [item] = a.splice(dragIdx, 1); a.splice(newIdx, 0, item);
-        onUpdate(a); setDragIdx(newIdx); touchState.current.startY = e.touches[0].clientY; touchState.current.idx = newIdx;
-        touchState.current.moved = true;
+  // Build display items: each series becomes ONE stacked card holding its books,
+  // standalone wishes are individual cards. Manual priority order is preserved
+  // (a series takes the position of its first book in the list).
+  const buildItems = (list) => {
+    const items = [];
+    const seen = new Set();
+    list.forEach(w => {
+      if (w.seriesName) {
+        if (!seen.has(w.seriesName)) {
+          seen.add(w.seriesName);
+          items.push({ type: "series", key: "s:" + w.seriesName, name: w.seriesName,
+            books: list.filter(x => x.seriesName === w.seriesName).sort((a, b) => (a.seriesNumber || 0) - (b.seriesNumber || 0)) });
+        }
+      } else {
+        items.push({ type: "single", key: "w:" + w.id, wish: w });
       }
+    });
+    return items;
+  };
+  const flatten = (its) => { const out = []; its.forEach(it => it.type === "series" ? out.push(...it.books) : out.push(it.wish)); return out; };
+
+  const items = buildItems(wishes);
+
+  const updateWish = (id, f, v) => onUpdate(wishes.map(w => w.id === id ? { ...w, [f]: v } : w));
+  const handleCoverUpload = (wid, e) => { const f = e.target.files?.[0]; if (!f) return; compressImage(f).then(url => updateWish(wid, "coverUrl", url)); };
+
+  const handleSearchSelect = (r) => {
+    const w = emptyWish(); w.title = r.title; w.author = r.author; w.genre = r.genre; w.coverUrl = r.cover;
+    onUpdate([...wishes, w]); setShowSearch(false); setEditingId(w.id);
+    setTimeout(() => itemRefs.current["w:" + w.id]?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+  };
+  const handleAddManual = () => {
+    const id = onAdd(); setEditingId(id);
+    setTimeout(() => itemRefs.current["w:" + id]?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+  };
+
+  // ── Reorder by DRAG HANDLE only (the dots). The rest of the card scrolls freely. ──
+  const dragInfo = useRef({});
+  const onHandleStart = (key) => { setDragKey(key); };
+  const onListTouchMove = (e) => {
+    if (!dragKey) return;
+    const y = e.touches[0].clientY;
+    let target = -1;
+    items.forEach((it, idx) => {
+      const el = itemRefs.current[it.key];
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (y >= r.top && y <= r.bottom) target = idx;
+    });
+    const cur = items.findIndex(it => it.key === dragKey);
+    if (target >= 0 && cur >= 0 && target !== cur) {
+      const a = [...items]; const [m] = a.splice(cur, 1); a.splice(target, 0, m);
+      onUpdate(flatten(a));
     }
   };
-  const handleTouchEnd = () => { setDragIdx(null); };
+  const onListTouchEnd = () => setDragKey(null);
+
+  const Handle = ({ itemKey, index }) => (
+    <div onTouchStart={() => onHandleStart(itemKey)}
+      onMouseDown={() => onHandleStart(itemKey)}
+      style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+        padding: "4px 2px", cursor: "grab", touchAction: "none", userSelect: "none", WebkitUserSelect: "none" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 3px)", gap: 3 }}>
+        {Array.from({ length: 8 }).map((_, k) => (
+          <span key={k} style={{ width: 3, height: 3, borderRadius: "50%", background: colors.textLight }} />
+        ))}
+      </div>
+      <div style={{ width: 24, height: 24, borderRadius: "50%", background: colors.wishSoft, display: "flex",
+        alignItems: "center", justifyContent: "center", fontFamily: fonts.display, fontSize: 12, fontWeight: 700, color: colors.wishDark }}>
+        {index + 1}
+      </div>
+    </div>
+  );
+
+  const miniCover = (wish, w = 46, h = 66) => (
+    wish.coverUrl
+      ? <img src={wish.coverUrl} alt="" style={{ width: w, height: h, objectFit: "cover", borderRadius: 5 }} />
+      : <div style={{ width: w, height: h, borderRadius: 5,
+          background: `linear-gradient(145deg,${wish.coverColor || colors.accent},${wish.coverColor || colors.accent}dd)`,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 4, textAlign: "center" }}>
+          <span style={{ fontFamily: fonts.display, fontSize: 9, fontWeight: 700, color: "#fff", lineHeight: 1.1 }}>{wish.title || "?"}</span>
+        </div>
+  );
+
+  const startBtn = (wish, small) => (
+    <button onClick={() => onStartReading(wish)}
+      style={{ background: `linear-gradient(135deg,${colors.accent},${colors.accentDark})`, color: "#fff",
+        border: "none", borderRadius: small ? 10 : 12, padding: small ? "5px 10px" : "5px 14px",
+        fontFamily: fonts.body, fontSize: small ? 10 : 11, fontWeight: 600, cursor: "pointer",
+        display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>📖 {small ? "Ler" : "Começar a ler"}</button>
+  );
+
+  // Editor reused for both standalone wishes and books inside a series
+  const renderEditor = (wish) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+      <input value={wish.title} onChange={e => updateWish(wish.id, "title", e.target.value)} placeholder="Título" autoFocus
+        style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: 600, border: "none", borderBottom: `1px solid ${colors.border}`,
+          padding: "3px 0", outline: "none", background: "transparent", color: colors.text }} />
+      <input value={wish.author || ""} onChange={e => updateWish(wish.id, "author", e.target.value)} placeholder="Autor" list={`aut-${wish.id}`}
+        style={{ fontFamily: fonts.body, fontSize: 12, border: "none", borderBottom: `1px solid ${colors.border}`,
+          padding: "3px 0", outline: "none", background: "transparent", color: colors.textMuted, width: "100%" }} />
+      <datalist id={`aut-${wish.id}`}>{knownAuthors.map(a => <option key={a} value={a} />)}</datalist>
+      <div style={{ marginTop: 4 }}><GenrePicker value={wish.genre} onChange={v => updateWish(wish.id, "genre", v)} compact={true} /></div>
+      <div style={{ marginTop: 4 }}>
+        <input value={wish.seriesName || ""} onChange={e => updateWish(wish.id, "seriesName", e.target.value)}
+          placeholder="Série (deixe vazio se for avulso)" list="wish-series-list"
+          style={{ fontFamily: fonts.body, fontSize: 12, border: "none", borderBottom: `1px solid ${colors.border}`,
+            padding: "3px 0", outline: "none", background: "transparent", color: colors.textMuted, width: "100%" }} />
+        <datalist id="wish-series-list">{existingSeries.map(s => <option key={s} value={s} />)}</datalist>
+      </div>
+      {wish.seriesName ? (
+        <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontFamily: fonts.body, fontSize: 10, color: colors.textMuted }}>Nº na série</span>
+            <input type="number" min="1" value={wish.seriesNumber || ""} onChange={e => updateWish(wish.id, "seriesNumber", parseInt(e.target.value) || 0)}
+              placeholder="1" style={{ fontFamily: fonts.body, fontSize: 13, border: "none", borderBottom: `1px solid ${colors.border}`,
+                padding: "3px 0", outline: "none", background: "transparent", color: colors.text, width: "100%" }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontFamily: fonts.body, fontSize: 10, color: colors.textMuted }}>Total</span>
+            <input type="number" min="1" value={wish.seriesTotal || ""} onChange={e => updateWish(wish.id, "seriesTotal", parseInt(e.target.value) || 0)}
+              placeholder="3" style={{ fontFamily: fonts.body, fontSize: 13, border: "none", borderBottom: `1px solid ${colors.border}`,
+                padding: "3px 0", outline: "none", background: "transparent", color: colors.text, width: "100%" }} />
+          </div>
+        </div>
+      ) : null}
+      <textarea value={wish.note} onChange={e => updateWish(wish.id, "note", e.target.value)}
+        placeholder="Anotação (sobre o que é, quem indicou, por que quer ler...)"
+        style={{ fontFamily: fonts.body, fontSize: 13, border: `1px solid ${colors.border}`, borderRadius: 8,
+          padding: 8, outline: "none", background: colors.accentSoft, color: colors.text, minHeight: 50, resize: "vertical", lineHeight: 1.5 }} />
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button onClick={() => onDelete(wish.id)} style={{ background: "none", border: "none", color: "#d45", fontSize: 11, fontFamily: fonts.body, cursor: "pointer" }}>Excluir</button>
+        <button onClick={() => setEditingId(null)} style={{ background: colors.wish, color: "#fff", border: "none", borderRadius: 12,
+          padding: "5px 14px", fontFamily: fonts.body, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Salvar</button>
+      </div>
+    </div>
+  );
 
   return (
     <div style={{ padding: "0 20px 100px", maxWidth: 650, margin: "0 auto" }}
-      onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+      onTouchMove={onListTouchMove} onTouchEnd={onListTouchEnd}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
         <div>
           <h2 style={{ fontFamily: fonts.display, fontSize: 22, color: colors.text, margin: 0, fontStyle: "italic" }}>📋 Minha Wishlist</h2>
           <p style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted, margin: "2px 0 0" }}>
-            {wishes.length} livro{wishes.length !== 1 ? "s" : ""} • segure e arraste para reorganizar</p>
+            {wishes.length} livro{wishes.length !== 1 ? "s" : ""} • arraste pela alça para reorganizar</p>
         </div>
         <button onClick={() => setShowSearch(true)} style={{ background: colors.wishSoft, border: `1.5px solid ${colors.wish}`,
           borderRadius: 18, padding: "7px 14px", fontFamily: fonts.body, fontSize: 12, fontWeight: 600, color: colors.wishDark, cursor: "pointer" }}>🔍 Buscar</button>
       </div>
+
       {wishes.length === 0 ? (
         <div style={{ textAlign: "center", padding: "50px 20px", color: colors.textMuted, fontFamily: fonts.body }}>
           <div style={{ fontSize: 42, marginBottom: 12, opacity: .4 }}>📋</div>
@@ -731,78 +836,102 @@ function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading, allBo
           <p style={{ fontSize: 12, color: colors.textLight }}>Pare de salvar no Instagram! Adicione aqui 😉</p>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {wishes.map((wish, i) => {
-            const isE = editingId === wish.id;
-            const isDragging = dragIdx === i;
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {items.map((item, i) => {
+            const dragging = dragKey === item.key;
+            const cardStyle = {
+              background: dragging ? colors.wishSoft : colors.card, borderRadius: 14, padding: 14,
+              border: `1.5px solid ${dragging ? colors.wish : colors.border}`,
+              display: "flex", gap: 12, alignItems: "flex-start",
+              transition: dragging ? "none" : "all .2s",
+              boxShadow: dragging ? `0 6px 20px ${colors.shadow}` : "none",
+            };
+
+            // ─── Standalone wish ───
+            if (item.type === "single") {
+              const wish = item.wish; const isE = editingId === wish.id;
+              return (
+                <div key={item.key} ref={el => itemRefs.current[item.key] = el} style={cardStyle}>
+                  <Handle itemKey={item.key} index={i} />
+                  <div style={{ flexShrink: 0, textAlign: "center" }}>
+                    <div onClick={() => setEditingId(wish.id)} style={{ cursor: "pointer" }}>{miniCover(wish, 55, 80)}</div>
+                    <input ref={el => fileRefs.current[wish.id] = el} type="file" accept="image/*" onChange={e => handleCoverUpload(wish.id, e)} style={{ display: "none" }} />
+                    {isE && <button onClick={e => { e.stopPropagation(); fileRefs.current[wish.id]?.click(); }} style={{ marginTop: 4, background: "none", border: "none",
+                      fontSize: 9, color: colors.accent, cursor: "pointer", fontFamily: fonts.body, fontWeight: 600 }}>📷 Capa</button>}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {isE ? renderEditor(wish) : (
+                      <>
+                        <div onClick={() => setEditingId(wish.id)} style={{ cursor: "pointer" }}>
+                          <p style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: 600, color: colors.text, margin: 0, lineHeight: 1.3 }}>{wish.title || "Sem título"}</p>
+                          {wish.author && <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, margin: "2px 0 0" }}>{wish.author}</p>}
+                          {wish.genre && (<div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
+                            {wish.genre.split(", ").filter(Boolean).map(g => (
+                              <span key={g} style={{ display: "inline-block", background: colors.wishSoft, color: colors.wishDark,
+                                fontSize: 10, fontFamily: fonts.body, fontWeight: 600, padding: "2px 8px", borderRadius: 8 }}>{g}</span>))}
+                          </div>)}
+                          {wish.note && <p style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, margin: "6px 0 0", lineHeight: 1.5 }}>{wish.note}</p>}
+                        </div>
+                        <div style={{ marginTop: 8 }}>{startBtn(wish)}</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            // ─── Series (stacked) ───
+            const total = Math.max(...item.books.map(b => b.seriesTotal || 0), item.books.length);
             return (
-              <div key={wish.id} ref={el => itemRefs.current[wish.id] = el}
-                onTouchStart={e => { if (!isE) handleTouchStart(i, e); }}
-                style={{ background: isDragging ? colors.wishSoft : colors.card, borderRadius: 14, padding: 14,
-                border: `1.5px solid ${isDragging ? colors.wish : colors.border}`, display: "flex", gap: 12, alignItems: "flex-start",
-                transition: isDragging ? "none" : "all .2s", transform: isDragging ? "scale(1.02)" : "none",
-                boxShadow: isDragging ? `0 6px 20px ${colors.shadow}` : "none",
-                userSelect: isE ? "auto" : "none", WebkitUserSelect: isE ? "auto" : "none",
-                touchAction: isE ? "auto" : "pan-x" }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0 }}>
-                  <button onClick={() => moveItem(i,-1)} disabled={i===0} style={{ background: "none", border: "none", fontSize: 14,
-                    cursor: i===0?"default":"pointer", color: i===0?colors.border:colors.textMuted, padding: "2px 4px", lineHeight: 1 }}>▲</button>
-                  <div style={{ width: 26, height: 26, borderRadius: "50%", background: colors.wishSoft, display: "flex",
-                    alignItems: "center", justifyContent: "center", fontFamily: fonts.display, fontSize: 13, fontWeight: 700, color: colors.wishDark }}>{i+1}</div>
-                  <button onClick={() => moveItem(i,1)} disabled={i===wishes.length-1} style={{ background: "none", border: "none", fontSize: 14,
-                    cursor: i===wishes.length-1?"default":"pointer", color: i===wishes.length-1?colors.border:colors.textMuted, padding: "2px 4px", lineHeight: 1 }}>▼</button>
-                </div>
-                <div style={{ flexShrink: 0, textAlign: "center" }} onClick={() => !isE && setEditingId(wish.id)}>
-                  <Cover book={wish} w={55} h={80} radius={6} onClick={() => setEditingId(wish.id)} />
-                  <input ref={el => fileRefs.current[wish.id]=el} type="file" accept="image/*" onChange={e => handleCoverUpload(wish.id,e)} style={{ display: "none" }} />
-                  {isE && <button onClick={(e) => { e.stopPropagation(); fileRefs.current[wish.id]?.click(); }} style={{ marginTop: 4, background: "none", border: "none",
-                    fontSize: 9, color: colors.accent, cursor: "pointer", fontFamily: fonts.body, fontWeight: 600 }}>📷 Capa</button>}
-                </div>
+              <div key={item.key} ref={el => itemRefs.current[item.key] = el} style={cardStyle}>
+                <Handle itemKey={item.key} index={i} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  {isE ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <input value={wish.title} onChange={e => updateWish(wish.id,"title",e.target.value)} placeholder="Título" autoFocus
-                        style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: 600, border: "none", borderBottom: `1px solid ${colors.border}`,
-                          padding: "3px 0", outline: "none", background: "transparent", color: colors.text }} />
-                      <div style={{ position: "relative" }}>
-                        <input value={wish.author||""} onChange={e => updateWish(wish.id,"author",e.target.value)} placeholder="Autor"
-                          list={`authors-${wish.id}`}
-                          style={{ fontFamily: fonts.body, fontSize: 12, border: "none", borderBottom: `1px solid ${colors.border}`,
-                            padding: "3px 0", outline: "none", background: "transparent", color: colors.textMuted, width: "100%" }} />
-                        <datalist id={`authors-${wish.id}`}>{knownAuthors.map(a => <option key={a} value={a} />)}</datalist>
-                      </div>
-                      <div style={{ marginTop: 4 }}><GenrePicker value={wish.genre} onChange={v => updateWish(wish.id,"genre",v)} compact={true} /></div>
-                      <textarea value={wish.note} onChange={e => updateWish(wish.id,"note",e.target.value)}
-                        placeholder="Anotação (sobre o que é, quem indicou, por que quer ler...)"
-                        style={{ fontFamily: fonts.hand, fontSize: 15, border: `1px solid ${colors.border}`, borderRadius: 8,
-                          padding: 8, outline: "none", background: colors.accentSoft, color: colors.text, minHeight: 50, resize: "vertical" }} />
-                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                        <button onClick={() => onDelete(wish.id)} style={{ background: "none", border: "none", color: "#d45", fontSize: 11, fontFamily: fonts.body, cursor: "pointer" }}>Excluir</button>
-                        <button onClick={() => setEditingId(null)} style={{ background: colors.wish, color: "#fff", border: "none", borderRadius: 12,
-                          padding: "5px 14px", fontFamily: fonts.body, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Salvar</button>
-                      </div>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
+                    <div style={{ position: "relative", width: 58, height: 72, flexShrink: 0 }}>
+                      {item.books.slice(0, 3).map((bk, k) => (
+                        <div key={bk.id} style={{ position: "absolute", left: k * 6, top: k * 2,
+                          transform: `rotate(${(k - 1) * 4}deg)`, transformOrigin: "bottom center",
+                          boxShadow: "0 2px 8px rgba(0,0,0,.12)", borderRadius: 5, overflow: "hidden", zIndex: k }}>
+                          {miniCover(bk, 46, 66)}
+                        </div>
+                      ))}
                     </div>
-                  ) : (
-                    <>
-                    <div onClick={() => setEditingId(wish.id)} style={{ cursor: "pointer" }}>
-                      <p style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: 600, color: colors.text, margin: 0, lineHeight: 1.3 }}>{wish.title||"Sem título"}</p>
-                      {wish.author && <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, margin: "2px 0 0" }}>{wish.author}</p>}
-                      {wish.genre && (<div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
-                        {wish.genre.split(", ").filter(Boolean).map(g => (
-                          <span key={g} style={{ display: "inline-block", background: colors.wishSoft, color: colors.wishDark,
-                            fontSize: 10, fontFamily: fonts.body, fontWeight: 600, padding: "2px 8px", borderRadius: 8 }}>{g}</span>))}
-                      </div>)}
-                      {wish.note && <p style={{ fontFamily: fonts.hand, fontSize: 14, color: colors.textMuted, margin: "5px 0 0", lineHeight: 1.3, fontStyle: "italic" }}>"{wish.note}"</p>}
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: 700, color: colors.text, margin: 0 }}>📚 {item.name}</p>
+                      <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, margin: "2px 0 0" }}>
+                        {item.books.length} de {total} livro{total !== 1 ? "s" : ""} na wishlist</p>
                     </div>
-                    <button onClick={() => onStartReading(wish)}
-                      style={{ marginTop: 8, background: `linear-gradient(135deg,${colors.accent},${colors.accentDark})`,
-                        color: "#fff", border: "none", borderRadius: 12, padding: "5px 14px",
-                        fontFamily: fonts.body, fontSize: 11, fontWeight: 600, cursor: "pointer",
-                        display: "flex", alignItems: "center", gap: 4 }}>
-                      📖 Começar a ler
-                    </button>
-                    </>
-                  )}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {item.books.map(bk => {
+                      const isE = editingId === bk.id;
+                      return (
+                        <div key={bk.id} style={{ borderTop: `1px solid ${colors.line}`, paddingTop: 8 }}>
+                          <input ref={el => fileRefs.current[bk.id] = el} type="file" accept="image/*" onChange={e => handleCoverUpload(bk.id, e)} style={{ display: "none" }} />
+                          {isE ? (
+                            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                              <div style={{ flexShrink: 0, textAlign: "center" }}>
+                                <div onClick={() => fileRefs.current[bk.id]?.click()} style={{ cursor: "pointer" }}>{miniCover(bk, 46, 66)}</div>
+                                <button onClick={() => fileRefs.current[bk.id]?.click()} style={{ marginTop: 3, background: "none", border: "none",
+                                  fontSize: 9, color: colors.accent, cursor: "pointer", fontFamily: fonts.body, fontWeight: 600 }}>📷 Capa</button>
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>{renderEditor(bk)}</div>
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                              <div onClick={() => setEditingId(bk.id)} style={{ cursor: "pointer", flexShrink: 0 }}>{miniCover(bk, 38, 54)}</div>
+                              <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setEditingId(bk.id)}>
+                                <p style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.text, margin: 0 }}>
+                                  {bk.seriesNumber ? `#${bk.seriesNumber} ` : ""}{bk.title || "Sem título"}</p>
+                                {bk.note && <p style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, margin: "2px 0 0", lineHeight: 1.4 }}>{bk.note}</p>}
+                              </div>
+                              {startBtn(bk, true)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             );
@@ -810,20 +939,16 @@ function WishlistView({ wishes, onUpdate, onAdd, onDelete, onStartReading, allBo
         </div>
       )}
       {showSearch && <CoverSearch onSelect={handleSearchSelect} onClose={() => setShowSearch(false)} />}
-      {/* FAB */}
       <div onClick={handleAddManual} style={{ position: "fixed", bottom: 28, right: 20, width: 54, height: 54,
         borderRadius: "50%", background: `linear-gradient(135deg,${colors.wish},${colors.wishDark})`,
         display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-        boxShadow: `0 4px 16px rgba(168,197,214,.5)`, zIndex: 30, fontSize: 26, color: "#fff",
-        transition: "transform .2s" }}
-        onMouseEnter={e => e.currentTarget.style.transform = "scale(1.1)"}
-        onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>+</div>
+        boxShadow: `0 4px 16px rgba(168,197,214,.5)`, zIndex: 30, fontSize: 26, color: "#fff" }}>+</div>
     </div>
   );
 }
 
 /* ── REVIEW PAGE ── */
-function ReviewPage({ book, onUpdate, onDelete, onBack, allBooks, backLabel = "← Biblioteca" }) {
+function ReviewPage({ book, onUpdate, onDelete, onBack, allBooks, onMoveToWishlist, backLabel = "← Biblioteca" }) {
   const [b, setB] = useState({ ...book });
   const [showDelete, setShowDelete] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -895,11 +1020,11 @@ function ReviewPage({ book, onUpdate, onDelete, onBack, allBooks, backLabel = "�
               <input value={b.pages} onChange={e => set("pages",e.target.value)} placeholder="368" type="number" style={inp}
                 onFocus={e => e.target.style.borderColor=colors.accent} onBlur={e => e.target.style.borderColor=colors.border} /></div>
             <div style={{ flex: 1 }}><label style={lbl}>Status</label>
-              <select value={b.status} onChange={e => set("status",e.target.value)}
+              <select value={b.status} onChange={e => { if (e.target.value === "wishlist") { onMoveToWishlist && onMoveToWishlist(b); } else { set("status", e.target.value); } }}
                 style={{ ...inp, appearance: "none", cursor: "pointer",
                   backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238A8490' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E")`,
                   backgroundRepeat: "no-repeat", backgroundPosition: "right 4px center", paddingRight: 20 }}>
-                <option value="reading">📖 Lendo</option><option value="read">✅ Lido</option><option value="wishlist">📋 Wishlist</option>
+                <option value="reading">📖 Lendo</option><option value="read">✅ Lido</option><option value="wishlist">📋 Mover para Wishlist</option>
               </select></div>
           </div>
           <div style={{ marginBottom: 12 }}><label style={lbl}>Formato</label>
@@ -1251,7 +1376,6 @@ const MOODS = [
   { emoji: "😱", label: "Chocada" }, { emoji: "😴", label: "Entediada" },
   { emoji: "🤯", label: "Mind blown" }, { emoji: "🥰", label: "Apaixonada" },
 ];
-
 function BookClubView() {
   const [profile, setProfile] = useState(null);
   const [club, setClub] = useState({ currentBook: null, members: {}, updates: [] });
@@ -2446,7 +2570,30 @@ export default function App() {
   const importRef = useRef(null);
 
   useEffect(() => { (async () => {
-    try { const r = await window.storage.get(STORAGE_KEY); if (r?.value) setData(JSON.parse(r.value)); } catch(e) {}
+    try {
+      const r = await window.storage.get(STORAGE_KEY);
+      if (r?.value) {
+        const d = JSON.parse(r.value);
+        // Recover any books accidentally left stuck with status "wishlist" (old bug):
+        // turn them into real wishlist items and take them out of the library.
+        const stuck = (d.books || []).filter(b => b.status === "wishlist");
+        if (stuck.length) {
+          let ws = d.wishes || [];
+          stuck.forEach(b => {
+            if (!ws.some(w => w.title === b.title && w.author === b.author)) {
+              ws = [...ws, { id: rid(), title: b.title, author: b.author || "", genre: b.genre || "",
+                note: b.summary || "", coverUrl: b.coverUrl || "", coverColor: b.coverColor || rcolor(),
+                seriesName: b.seriesName || "", seriesNumber: b.seriesNumber || 0, seriesTotal: b.seriesTotal || 0,
+                createdAt: new Date().toISOString() }];
+            }
+          });
+          d.books = (d.books || []).filter(b => b.status !== "wishlist");
+          d.wishes = ws;
+          try { await window.storage.set(STORAGE_KEY, JSON.stringify(d)); } catch(e) {}
+        }
+        setData(d);
+      }
+    } catch(e) {}
     // Load community in background
     try {
       if (window.storage.getCommunity) {
@@ -2523,16 +2670,24 @@ export default function App() {
   };
 
   const updateBook = ub => {
-    let ws = data.wishes || [];
-    const old = data.books.find(b => b.id === ub.id);
-    if (ub.status === "wishlist" && old && old.status !== "wishlist") {
-      if (!ws.some(w => w.title === ub.title && w.author === ub.author)) {
-        const w = emptyWish(); w.title=ub.title; w.author=ub.author; w.genre=ub.genre; w.coverUrl=ub.coverUrl; w.coverColor=ub.coverColor;
-        ws = [...ws, w];
-      }
-    }
-    save({ ...data, books: data.books.map(b => b.id===ub.id ? ub : b), wishes: ws });
+    save({ ...data, books: data.books.map(b => b.id===ub.id ? ub : b) });
   };
+
+  // Move a book OUT of the library and INTO the wishlist (clean, no phantom).
+  const moveBookToWishlist = (book) => {
+    let ws = data.wishes || [];
+    if (!ws.some(w => w.title === book.title && w.author === book.author)) {
+      const w = emptyWish();
+      w.title = book.title; w.author = book.author || ""; w.genre = book.genre || "";
+      w.note = book.summary || ""; w.coverUrl = book.coverUrl || ""; w.coverColor = book.coverColor || rcolor();
+      w.seriesName = book.seriesName || ""; w.seriesNumber = book.seriesNumber || 0; w.seriesTotal = book.seriesTotal || 0;
+      ws = [...ws, w];
+    }
+    save({ ...data, books: data.books.filter(b => b.id !== book.id), wishes: ws });
+    setSelected(null);
+    setView("wishlist");
+  };
+
   const deleteBook = id => save({ ...data, books: data.books.filter(b => b.id!==id) });
   const addYear = () => { const m = Math.max(...data.years); save({ ...data, years: [...data.years, m+1] }); setYear(m+1); };
   const addWish = () => {
@@ -2547,6 +2702,7 @@ export default function App() {
     const nb = emptyBook(year);
     nb.title = wish.title; nb.author = wish.author || ""; nb.genre = wish.genre || "";
     nb.coverUrl = wish.coverUrl || ""; nb.coverColor = wish.coverColor || rcolor();
+    nb.seriesName = wish.seriesName || ""; nb.seriesNumber = wish.seriesNumber || 0; nb.seriesTotal = wish.seriesTotal || 0;
     nb.status = "reading";
     const newBooks = [nb, ...data.books];
     const newWishes = (data.wishes || []).filter(w => w.id !== wish.id);
@@ -2732,7 +2888,7 @@ export default function App() {
           onAddBook={() => addBook(activeSeries)}
           onBack={() => { setActiveSeries(null); setView("library"); }} />}
         {view==="review" && selected && <ReviewPage book={selected} allBooks={data.books}
-          onUpdate={updateBook} onDelete={deleteBook}
+          onUpdate={updateBook} onDelete={deleteBook} onMoveToWishlist={moveBookToWishlist}
           backLabel={activeSeries ? `← ${activeSeries}` : "← Biblioteca"}
           onBack={() => { setSelected(null); setView(activeSeries ? "series" : "library"); }} />}
         {view==="stats" && (
